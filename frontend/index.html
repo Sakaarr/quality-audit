@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quality Audit System</title>
+
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+
+  <body>
+    <div class="app-container">
+      <header class="main-header">
+        <div class="header-content">
+          <div class="logo-area">
+            <i class="ph ph-clipboard-text"></i>
+            <h1>Quality Audit</h1>
+          </div>
+          <p class="subtitle">
+            Automated document verification & compliance check
+          </p>
+        </div>
+
+        <!-- File Type Toggle -->
+        <div class="file-type-toggle">
+          <button id="pdfToggle" class="toggle-btn active" data-type="pdf">
+            <i class="ph ph-file-pdf"></i> PDF
+          </button>
+          <button id="docxToggle" class="toggle-btn" data-type="docx">
+            <i class="ph ph-file-doc"></i> DOCX
+          </button>
+        </div>
+      </header>
+
+      <main>
+        <!-- Upload Section -->
+        <section class="upload-section">
+          <div class="section-header">
+            <h2>Upload Documents</h2>
+            <p>Select or drag & drop your files below</p>
+          </div>
+
+          <div class="upload-grid">
+            <!-- CE1 -->
+            <div class="upload-card" data-file-key="ce1">
+              <div class="card-status-indicator"></div>
+              <div class="card-content">
+                <div class="icon-wrapper">
+                  <i class="ph ph-upload-simple"></i>
+                </div>
+                <h3>CE1 Document</h3>
+                <p class="file-name">No file selected</p>
+              </div>
+              <input
+                type="file"
+                id="ce1File"
+                accept=".pdf"
+                class="file-input"
+              />
+              <label for="ce1File" class="file-label-overlay"></label>
+              <div class="upload-status" id="ce1Status"></div>
+            </div>
+
+            <!-- CE2 -->
+            <div class="upload-card" data-file-key="ce2">
+              <div class="card-status-indicator"></div>
+              <div class="card-content">
+                <div class="icon-wrapper">
+                  <i class="ph ph-upload-simple"></i>
+                </div>
+                <h3>CE2 Document</h3>
+                <p class="file-name">No file selected</p>
+              </div>
+              <input
+                type="file"
+                id="ce2File"
+                accept=".pdf"
+                class="file-input"
+              />
+              <label for="ce2File" class="file-label-overlay"></label>
+              <div class="upload-status" id="ce2Status"></div>
+            </div>
+
+            <!-- CE3 -->
+            <div class="upload-card" data-file-key="ce3">
+              <div class="card-status-indicator"></div>
+              <div class="card-content">
+                <div class="icon-wrapper">
+                  <i class="ph ph-upload-simple"></i>
+                </div>
+                <h3>CE3 Document</h3>
+                <p class="file-name">No file selected</p>
+              </div>
+              <input
+                type="file"
+                id="ce3File"
+                accept=".pdf"
+                class="file-input"
+              />
+              <label for="ce3File" class="file-label-overlay"></label>
+              <div class="upload-status" id="ce3Status"></div>
+            </div>
+
+            <!-- RW -->
+            <div class="upload-card" data-file-key="rw">
+              <div class="card-status-indicator"></div>
+              <div class="card-content">
+                <div class="icon-wrapper">
+                  <i class="ph ph-file-text"></i>
+                </div>
+                <h3>RW Document</h3>
+                <p class="file-name">No file selected</p>
+              </div>
+              <input type="file" id="rwFile" accept=".pdf" class="file-input" />
+              <label for="rwFile" class="file-label-overlay"></label>
+              <div class="upload-status" id="rwStatus"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Results Section -->
+        <section
+          class="results-section"
+          id="resultsSection"
+          style="display: none"
+        >
+          <div class="section-header">
+            <h2>Audit Results</h2>
+            <div class="status-legend">
+              <span class="legend-item"
+                ><span class="dot success"></span>Pass</span
+              >
+              <span class="legend-item"
+                ><span class="dot error"></span>Fail</span
+              >
+            </div>
+          </div>
+
+          <div class="table-wrapper">
+            <table class="results-table">
+              <thead>
+                <tr>
+                  <th class="col-task">Task Name</th>
+                  <th>CE1</th>
+                  <th>CE2</th>
+                  <th>CE3</th>
+                  <th>RW</th>
+                  <th class="col-action">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="task-info">
+                    <div class="task-icon"><i class="ph ph-text-aa"></i></div>
+                    <span class="task-name">Grammar Check</span>
+                  </td>
+                  <td id="grammar-ce1" class="result-cell">-</td>
+                  <td id="grammar-ce2" class="result-cell">-</td>
+                  <td id="grammar-ce3" class="result-cell">-</td>
+                  <td id="grammar-rw" class="result-cell">-</td>
+                  <td class="action-cell">
+                    <button class="run-btn" data-task="grammar">
+                      <i class="ph ph-play"></i> Run
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="task-info">
+                    <div class="task-icon">
+                      <i class="ph ph-check-circle"></i>
+                    </div>
+                    <span class="task-name">Title Validation</span>
+                  </td>
+                  <td id="title-val-ce1" class="result-cell">-</td>
+                  <td id="title-val-ce2" class="result-cell">-</td>
+                  <td id="title-val-ce3" class="result-cell">-</td>
+                  <td id="title-val-rw" class="result-cell">-</td>
+                  <td class="action-cell">
+                    <button class="run-btn" data-task="title-validation">
+                      <i class="ph ph-play"></i> Run
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="task-info">
+                    <div class="task-icon">
+                      <i class="ph ph-arrows-left-right"></i>
+                    </div>
+                    <span class="task-name">Title Comparison</span>
+                  </td>
+                  <td id="title-comp-ce1" class="result-cell">-</td>
+                  <td id="title-comp-ce2" class="result-cell">-</td>
+                  <td id="title-comp-ce3" class="result-cell">-</td>
+                  <td id="title-comp-rw" class="result-cell">-</td>
+                  <td class="action-cell">
+                    <button class="run-btn" data-task="title-comparison">
+                      <i class="ph ph-play"></i> Run
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="task-info">
+                    <div class="task-icon">
+                      <i class="ph ph-list-checks"></i>
+                    </div>
+                    <span class="task-name">Section Validation</span>
+                  </td>
+                  <td id="section-val-ce1" class="result-cell">-</td>
+                  <td id="section-val-ce2" class="result-cell">-</td>
+                  <td id="section-val-ce3" class="result-cell">-</td>
+                  <td id="section-val-rw" class="result-cell">-</td>
+                  <td class="action-cell">
+                    <button class="run-btn" data-task="section-validation">
+                      <i class="ph ph-play"></i> Run
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="task-info">
+                    <div class="task-icon"><i class="ph ph-file-code"></i></div>
+                    <span class="task-name">Format Comparison</span>
+                  </td>
+                  <td id="format-comp-ce1" class="result-cell">-</td>
+                  <td id="format-comp-ce2" class="result-cell">-</td>
+                  <td id="format-comp-ce3" class="result-cell">-</td>
+                  <td id="format-comp-rw" class="result-cell">-</td>
+                  <td class="action-cell">
+                    <button class="run-btn" data-task="format-comparison">
+                      <i class="ph ph-play"></i> Run
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="task-info">
+                    <div class="task-icon">
+                      <i class="ph ph-magnifying-glass"></i>
+                    </div>
+                    <span class="task-name">Google Validation</span>
+                  </td>
+                  <td id="google-val-ce1" class="result-cell">-</td>
+                  <td id="google-val-ce2" class="result-cell">-</td>
+                  <td id="google-val-ce3" class="result-cell">-</td>
+                  <td id="google-val-rw" class="result-cell">-</td>
+                  <td class="action-cell">
+                    <button class="run-btn" data-task="google-validation">
+                      <i class="ph ph-play"></i> Run
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="task-info">
+                    <div class="task-icon"><i class="ph ph-image"></i></div>
+                    <span class="task-name">Visual Validation</span>
+                  </td>
+                  <td id="visual-val-ce1" class="result-cell">-</td>
+                  <td id="visual-val-ce2" class="result-cell">-</td>
+                  <td id="visual-val-ce3" class="result-cell">-</td>
+                  <td id="visual-val-rw" class="result-cell">-</td>
+                  <td class="action-cell">
+                    <button class="run-btn" data-task="visual-validation">
+                      <i class="ph ph-play"></i> Run
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="task-info">
+                    <div class="task-icon">
+                      <i class="ph ph-calculator"></i>
+                    </div>
+                    <span class="task-name">AI Math Validation</span>
+                  </td>
+                  <td id="ai-math-ce1" class="result-cell">-</td>
+                  <td id="ai-math-ce2" class="result-cell">-</td>
+                  <td id="ai-math-ce3" class="result-cell">-</td>
+                  <td id="ai-math-rw" class="result-cell">-</td>
+                  <td class="action-cell">
+                    <button class="run-btn" data-task="ai-math-validation">
+                      <i class="ph ph-play"></i> Run
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="task-info">
+                    <div class="task-icon">
+                      <i class="ph ph-list-checks"></i>
+                    </div>
+                    <span class="task-name">Reference Validation</span>
+                  </td>
+                  <td id="reference-val-ce1" class="result-cell">-</td>
+                  <td id="reference-val-ce2" class="result-cell">-</td>
+                  <td id="reference-val-ce3" class="result-cell">-</td>
+                  <td id="reference-val-rw" class="result-cell">-</td>
+                  <td class="action-cell">
+                    <button class="run-btn" data-task="reference-validation">
+                      <i class="ph ph-play"></i> Run
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="task-info">
+                    <div class="task-icon"><i class="ph ph-code"></i></div>
+                    <span class="task-name">Code Validation</span>
+                  </td>
+                  <td id="code-val-ce1" class="result-cell">-</td>
+                  <td id="code-val-ce2" class="result-cell">-</td>
+                  <td id="code-val-ce3" class="result-cell">-</td>
+                  <td id="code-val-rw" class="result-cell">-</td>
+                  <td class="action-cell">
+                    <button class="run-btn" data-task="code-validation">
+                      <i class="ph ph-play"></i> Run
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="task-info">
+                    <div class="task-icon"><i class="ph ph-code"></i></div>
+                    <span class="task-name">Accessibility Validation</span>
+                  </td>
+                  <td id="accessibility-val-ce1" class="result-cell">-</td>
+                  <td id="accessibility-val-ce2" class="result-cell">-</td>
+                  <td id="accessibility-val-ce3" class="result-cell">-</td>
+                  <td id="accessibility-val-rw" class="result-cell">-</td>
+                  <td class="action-cell">
+                    <button class="run-btn" data-task="accessibility-validation">
+                      <i class="ph ph-play"></i> Run
+                    </button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="task-info">
+                    <div class="task-icon"><i class="ph ph-file-text"></i></div>
+                    <span class="task-name">Generate Report</span>
+                  </td>
+                  <td id="report-ce1" class="result-cell">-</td>
+                  <td id="report-ce2" class="result-cell">-</td>
+                  <td id="report-ce3" class="result-cell">-</td>
+                  <td id="report-rw" class="result-cell">-</td>
+                  <td class="action-cell">
+                    <button class="run-btn" data-task="generate-report">
+                      <i class="ph ph-play"></i> Run
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>

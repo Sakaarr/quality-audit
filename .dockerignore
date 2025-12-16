@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Database
+*.sqlite3
+db.sqlite3
+
+# Media and uploads (will be created fresh)
+media/
+hashFiles/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.docker
+
+# Misc
+*.log
+*.md
+.DS_Store
+Thumbs.db
+

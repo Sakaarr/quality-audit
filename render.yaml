@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: quality-audit-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/docs/
+    envVars:
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      # Use remote LanguageTool API to save ~300MB memory
+      - key: GRAMMAR_USE_REMOTE_API
+        value: "true"
+      # API Keys (set these in Render dashboard)
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_ID
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: "gemini-2.0-flash-exp"
