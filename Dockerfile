@@ -60,4 +60,6 @@ EXPOSE 8000
 # - Single worker to minimize memory
 # - 2 threads for concurrent requests  
 # - Long timeout for AI processing
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "1", "--threads", "2", "--timeout", "300", "--worker-class", "gthread", "audit_service.wsgi:application"]
+#
+# NOTE (Railway): bind to $PORT (Railway assigns a dynamic port).
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8000} --workers 1 --threads 2 --timeout 300 --worker-class gthread audit_service.wsgi:application"]
