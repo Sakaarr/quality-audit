@@ -145,22 +145,9 @@ MEDIA_ROOT = BASE_DIR / "media"
 
 
 # CORS configuration
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:8080",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:8080",
-    os.environ.get("VERCEL_FRONTEND_URL", ""),
-    os.environ.get("FRONTEND_URL", ""),
-]
-# Remove empty strings from list
-CORS_ALLOWED_ORIGINS = [url for url in CORS_ALLOWED_ORIGINS if url]
-
-# For development: allow all origins
-if DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = True
-    
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_URLS_REGEX = r"^/api/.*$"
+
 
 
 REST_FRAMEWORK = {
