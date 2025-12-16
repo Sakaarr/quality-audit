@@ -873,6 +873,79 @@ def generate_reference_validation_section(reference_data: Dict[str, Any]) -> str
     if not reference_data:
         return ''
     
+    # Check for new format with 'details' list
+    if 'details' in reference_data and isinstance(reference_data['details'], list):
+        total_refs = len(reference_data['details'])
+        valid_timeline = sum(1 for r in reference_data['details'] if r.get('timeline_validation', {}).get('is_valid'))
+        valid_format = sum(1 for r in reference_data['details'] if r.get('format_validation', {}).get('is_valid'))
+        
+        # Calculate an overall status simply
+        if total_refs == 0:
+            overall = "NO REFERENCES"
+            color = "#666"
+        elif valid_timeline == total_refs and valid_format == total_refs:
+            overall = "PASSED"
+            color = "#2e7d32"
+        else:
+            overall = "ATTENTION NEEDED"
+            color = "#f57c00"
+
+        details_html = []
+        for idx, ref in enumerate(reference_data['details'], 1):
+            raw_text = ref.get('raw_text', 'Unknown Reference')
+            # Truncate if too long
+            display_text = raw_text[:150] + "..." if len(raw_text) > 150 else raw_text
+            
+            timeline = ref.get('timeline_validation', {})
+            fmt = ref.get('format_validation', {})
+            
+            t_valid = timeline.get('is_valid', False)
+            t_msg = timeline.get('message', '')
+            f_valid = fmt.get('is_valid', False)
+            f_issues = fmt.get('issues', [])
+            
+            # Status badge
+            ref_status = 'VALID' if t_valid and f_valid else 'ISSUE'
+            ref_color = '#2e7d32' if t_valid and f_valid else '#d32f2f'
+            
+            issues_list = []
+            if not t_valid:
+                issues_list.append(f"Timeline: {t_msg}")
+            if not f_valid:
+                for issue in f_issues:
+                    issues_list.append(f"Format: {issue}")
+            
+            issues_html = ''
+            if issues_list:
+                issues_html = f'<div style="color: #d32f2f; font-size: 0.9em; margin-top: 5px;"><strong>Issues:</strong> <br/>{"<br/>".join(issues_list)}</div>'
+
+            details_html.append(f'''
+            <div class="ref-item" style="margin-bottom: 12px; padding: 10px; background: #fff; border-left: 3px solid {ref_color}; border: 1px solid #eee;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                    <strong style="color: #333;">Reference [{idx}]</strong>
+                    <span style="background: {ref_color}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">{ref_status}</span>
+                </div>
+                <div style="font-style: italic; color: #555; font-size: 0.9em; margin-bottom: 5px;">"{display_text}"</div>
+                {issues_html}
+            </div>
+            ''')
+            
+        return f'''
+        <section class="reference-section">
+            <h2>9. Reference/Constraint Validation</h2>
+            <div class="ref-summary">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: #f9f9f9;">
+                    <span>Found <strong>{total_refs}</strong> references</span>
+                    <strong style="color: {color};">{overall}</strong>
+                </div>
+                <div class="ref-details-list">
+                    {''.join(details_html)}
+                </div>
+            </div>
+        </section>
+        '''
+
+    # Fallback to old format
     overall = reference_data.get('overall_status', 'Unknown')
     checks = reference_data.get('checks', {})
     
