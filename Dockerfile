@@ -62,6 +62,5 @@ EXPOSE 8000
 # - Long timeout for AI processing
 #
 # NOTE (Railway): bind to $PORT (Railway assigns a dynamic port).
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8000} --workers 1 --threads 2 --timeout 300 --worker-class gthread audit_service.wsgi:application"]
-
+CMD ["sh", "-c", "python manage.py migrate && gunicorn --bind 0.0.0.0:${PORT:-8000} --workers 1 --threads 2 --timeout 300 --worker-class gthread audit_service.wsgi:application"]
 
