@@ -30,9 +30,8 @@ from documents.services.format_comparison import FormattingComparisonService
 from documents.services.pdf_parser import PdfParser
 from documents.services.file_hash import get_or_create_file_report
 from documents.services.title_validation import TitleValidationService
-from documents.utils import save_parsed_document
+from documents.utils import save_parsed_document, get_or_create_unified_document
 from documents.services.pdf_parser import PdfParser
-from documents.utils import save_parsed_document
 from documents.services.visual_validator import VisualContentValidator
 
 from documents.serializers import DocumentUploadSerializer, TitleComparisonSerializer, SectionValidationSerializer, SectionValidationSerializer, UploadSerializer
@@ -175,43 +174,58 @@ class DocxGrammarCheckView(BaseDocumentParserView):
 
     def handle(self, serializer):
         file_obj = serializer.validated_data["file"]
-        
+
         if not file_obj.name.lower().endswith(".docx"):
             raise ValidationError("Upload a .docx file to this endpoint.")
 
-        document = self.parser.parse(file_obj)
-        parsed_data = document.to_representation()
+        # 1) Try to serve from cached grammar report (no re-parse, no re-analysis)
+        cache_info = get_or_create_file_report(file_obj, "docx-grammer-validation")
+        if cache_info.get("from_cache"):
+            analyzed_segments = cache_info.get("report_data") or []
+        else:
+            # 2) Parse (or load) the document once using the shared parser cache
+            unified_doc, _ = get_or_create_unified_document(
+                file_obj,
+                enable_ocr=serializer.validated_data.get("enable_ocr", True),
+            )
+            parsed_data = unified_doc.to_representation()
 
-        paragraphs = parsed_data.get("text", {}).get("paragraphs", [])
-        if not paragraphs:
-            full_text = parsed_data.get("text", {}).get("full_text", "")
-            if full_text:
-                paragraphs = [full_text]
+            paragraphs = parsed_data.get("text", {}).get("paragraphs", [])
+            if not paragraphs:
+                full_text = parsed_data.get("text", {}).get("full_text", "")
+                if full_text:
+                    paragraphs = [full_text]
 
-        analyzed_segments = []
+            analyzed_segments = []
 
-        for index, paragraph in enumerate(paragraphs):
-            # Call the Service
-            analysis = GrammarAnalysisService.analyze_segment(paragraph)
+            for index, paragraph in enumerate(paragraphs):
+                analysis = GrammarAnalysisService.analyze_segment(paragraph)
 
-            if analysis["has_errors"]:
-                analyzed_segments.append({
-                    "paragraph_number": index + 1,
-                    "original_text": paragraph,
-                    "spelling_errors": analysis["spelling_errors"],
-                    "grammar_errors": analysis["grammar_errors"],
-                    "corrected_text": analysis["corrected_text"],
-                    "readability_scores": analysis["readability_scores"]
-                })
+                if analysis["has_errors"]:
+                    analyzed_segments.append(
+                        {
+                            "paragraph_number": index + 1,
+                            "original_text": paragraph,
+                            "spelling_errors": analysis["spelling_errors"],
+                            "grammar_errors": analysis["grammar_errors"],
+                            "corrected_text": analysis["corrected_text"],
+                            "readability_scores": analysis["readability_scores"],
+                        }
+                    )
 
-        get_or_create_file_report(file_obj, "docx-grammer-validation", analyzed_segments)
+            # 3) Persist grammar report keyed by file hash for future calls
+            get_or_create_file_report(
+                file_obj, "docx-grammer-validation", analyzed_segments
+            )
 
-        return Response({
-            "source_type": "docx",
-            "language_check": "en-US & en-GB (Permissive)",
-            "total_segments": len(analyzed_segments),
-            "results": analyzed_segments
-        })
+        return Response(
+            {
+                "source_type": "docx",
+                "language_check": "en-US & en-GB (Permissive)",
+                "total_segments": len(analyzed_segments),
+                "results": analyzed_segments,
+            }
+        )
 
 
 class PdfParseView(BaseDocumentParserView):
@@ -358,44 +372,56 @@ class PdfGrammarCheckView(BaseDocumentParserView):
 
     def handle(self, serializer):
         file_obj = serializer.validated_data["file"]
-        
+
         if not file_obj.name.lower().endswith(".pdf"):
             raise ValidationError("Upload a .pdf file to this endpoint.")
 
-        document = self.parser.parse(
-            file_obj,
-            enable_ocr=serializer.validated_data.get("enable_ocr", True)
+        # 1) Try cached PDF grammar report first
+        cache_info = get_or_create_file_report(file_obj, "pdf-grammer-validation")
+        if cache_info.get("from_cache"):
+            analyzed_pages = cache_info.get("report_data") or []
+        else:
+            # 2) Parse (or load) unified document once via shared cache
+            unified_doc, _ = get_or_create_unified_document(
+                file_obj,
+                enable_ocr=serializer.validated_data.get("enable_ocr", True),
+            )
+            parsed_data = unified_doc.to_representation()
+            pages = parsed_data.get("text", {}).get("pages", [])
+
+            analyzed_pages = []
+
+            for page in pages:
+                page_num = page.get("page_number", "Unknown")
+                text = page.get("text", "")
+
+                analysis = GrammarAnalysisService.analyze_segment(text)
+
+                if analysis["has_errors"]:
+                    analyzed_pages.append(
+                        {
+                            "page": page_num,
+                            "original_text": text,
+                            "spelling_errors": analysis["spelling_errors"],
+                            "grammar_errors": analysis["grammar_errors"],
+                            "corrected_text": analysis["corrected_text"],
+                            "readability_scores": analysis["readability_scores"],
+                        }
+                    )
+
+            # 3) Persist analyzed pages keyed by file hash
+            get_or_create_file_report(
+                file_obj, "pdf-grammer-validation", analyzed_pages
+            )
+
+        return Response(
+            {
+                "source_type": "pdf",
+                "language_check": "en-US & en-GB (Permissive)",
+                "total_pages": len(analyzed_pages),
+                "results": analyzed_pages,
+            }
         )
-        parsed_data = document.to_representation()
-        pages = parsed_data.get("text", {}).get("pages", [])
-
-        analyzed_pages = []
-
-        for page in pages:
-            page_num = page.get("page_number", "Unknown")
-            text = page.get("text", "")
-            
-            # Call the Service
-            analysis = GrammarAnalysisService.analyze_segment(text)
-
-            if analysis["has_errors"]:
-                analyzed_pages.append({
-                    "page": page_num,
-                    "original_text": text,
-                    "spelling_errors": analysis["spelling_errors"],
-                    "grammar_errors": analysis["grammar_errors"],
-                    "corrected_text": analysis["corrected_text"],
-                    "readability_scores": analysis["readability_scores"]
-                })
-
-        get_or_create_file_report(file_obj, "pdf-grammer-validation", analyzed_pages)
-
-        return Response({
-            "source_type": "pdf",
-            "language_check": "en-US & en-GB (Permissive)",
-            "total_pages": len(analyzed_pages),
-            "results": analyzed_pages
-        })
 
 class TitleValidationView(APIView):
     parser_classes = [MultiPartParser, FormParser]
@@ -425,8 +451,15 @@ class TitleValidationView(APIView):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         file_obj = serializer.validated_data["file"]
-        title = TitleValidationService().validate_and_extract_title(file_obj)
-        result = get_or_create_file_report(file_obj, "title_validation", title)
+
+        # First, try to reuse cached title validation for this file
+        cache_info = get_or_create_file_report(file_obj, "title_validation")
+        if cache_info.get("from_cache"):
+            title = cache_info.get("report_data")
+        else:
+            title = TitleValidationService().validate_and_extract_title(file_obj)
+            get_or_create_file_report(file_obj, "title_validation", title)
+
         if not title:
             return Response({"title": None, "is_valid": False, "reason": "Title not found"})
         return Response({"title": title, "is_valid": True, "reason": "Title is valid"})
@@ -507,7 +540,6 @@ class SectionValidationView(APIView):
         try:
             serializer = self.serializer_class(data=request.data)
             serializer.is_valid(raise_exception=True)
-
             file_obj = serializer.validated_data["file"]
             required_sections = serializer.validated_data.get("required_sections")
             
@@ -519,17 +551,20 @@ class SectionValidationView(APIView):
                 except json.JSONDecodeError:
                     required_sections = None
 
-            unified_doc = None
+            # If we already have a cached section validation for this file, reuse it
+            cache_info = get_or_create_file_report(file_obj, "section_validation")
+            if cache_info.get("from_cache"):
+                cached_result = cache_info.get("report_data") or {}
+                return Response(cached_result, status=status.HTTP_200_OK)
 
-            if file_obj.name.lower().endswith(".docx"):
-                parser = DocxParser()
-                unified_doc = parser.parse(file_obj) 
-            elif file_obj.name.lower().endswith(".pdf"):
-                parser = PdfParser()
-                unified_doc = parser.parse(file_obj)
-            else:
-                raise ValidationError("Unsupported file type. Only DOCX and PDF files are supported.")
+            # Ensure supported type and obtain (or build) unified document from cache
+            lower_name = file_obj.name.lower()
+            if not (lower_name.endswith(".docx") or lower_name.endswith(".pdf")):
+                raise ValidationError(
+                    "Unsupported file type. Only DOCX and PDF files are supported."
+                )
 
+            unified_doc, _ = get_or_create_unified_document(file_obj)
             sections_data = [s.to_representation() for s in unified_doc.sections]
 
             validator = SectionValidator(required_sections=required_sections)
@@ -540,7 +575,7 @@ class SectionValidationView(APIView):
             else:
                 result_dict = result
             
-            res = get_or_create_file_report(file_obj, "section_validation", result_dict)
+            get_or_create_file_report(file_obj, "section_validation", result_dict)
             return Response(result_dict, status=status.HTTP_200_OK)
             
         except Exception as e:
@@ -590,19 +625,25 @@ class GoogleSearchValidationView(APIView):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         file_obj = serializer.validated_data["file"]
+        lower_name = file_obj.name.lower()
 
-        # 1. Parse document to get text
-        text = ""
-        if file_obj.name.lower().endswith(".docx"):
-            parser = DocxParser()
-            doc = parser.parse(file_obj)
-            text = doc.text.get("full_text", "")
-        elif file_obj.name.lower().endswith(".pdf"):
-            parser = PdfParser()
-            doc = parser.parse(file_obj)
-            text = doc.text.get("full_text", "")
-        else:
+        # 0. Try to reuse cached Google search validation for this file
+        cache_info = get_or_create_file_report(file_obj, "google_search_validation")
+        if cache_info.get("from_cache"):
+            cached_results = cache_info.get("report_data") or []
+            return Response(
+                {
+                    "total_sentences_checked": len(cached_results),
+                    "results": cached_results,
+                }
+            )
+
+        # 1. Parse (or load) unified document to get full text
+        if not (lower_name.endswith(".docx") or lower_name.endswith(".pdf")):
             raise ValidationError("Unsupported file type. Use .docx or .pdf")
+
+        unified_doc, _ = get_or_create_unified_document(file_obj)
+        text = unified_doc.text.get("full_text", "") or ""
 
         # 2. Extract sentences
         sentences = re.split(r'(?<=[.!?])\s+', text)
@@ -624,11 +665,13 @@ class GoogleSearchValidationView(APIView):
         # 3. Validate with Google Search
         validator = GoogleSearchValidator()
         results = validator.validate_terms(terms_to_check)
-        res = get_or_create_file_report(file_obj, "google_search_validation", results)
-        return Response({
-            "total_sentences_checked": len(results),
-            "results": results
-        })
+        get_or_create_file_report(file_obj, "google_search_validation", results)
+        return Response(
+            {
+                "total_sentences_checked": len(results),
+                "results": results,
+            }
+        )
 
 class FormattingComparisonView(APIView):
     parser_classes = [MultiPartParser, FormParser]
@@ -799,24 +842,39 @@ class VisualValidationView(APIView):
         file_obj = serializer.validated_data['file']
         filename = file_obj.name.lower()
         
+        # Reuse cached visual validation if already computed for this file
+        cache_info = get_or_create_file_report(file_obj, "visual_validation")
+        if cache_info.get("from_cache"):
+            report = cache_info.get("report_data") or {}
+            return Response(
+                {
+                    "status": "success",
+                    "filename": filename,
+                    "source_type": "pdf" if filename.endswith('.pdf') else "docx",
+                    "validation_report": report,
+                }
+            )
+
         validator = VisualContentValidator()
-        
+
         try:
             if filename.endswith('.pdf'):
                 report = validator.validate_pdf(file_obj)
-                res = get_or_create_file_report(file_obj, "visual_validation", report)
+                get_or_create_file_report(file_obj, "visual_validation", report)
             elif filename.endswith('.docx'):
                 report = validator.validate_docx(file_obj)
-                res = get_or_create_file_report(file_obj, "visual_validation", report)
+                get_or_create_file_report(file_obj, "visual_validation", report)
             else:
                 raise ValidationError("Unsupported file type. Please upload .pdf or .docx")
 
-            return Response({
-                "status": "success",
-                "filename": filename,
-                "source_type": "pdf" if filename.endswith('.pdf') else "docx",
-                "validation_report": report
-            })
+            return Response(
+                {
+                    "status": "success",
+                    "filename": filename,
+                    "source_type": "pdf" if filename.endswith('.pdf') else "docx",
+                    "validation_report": report,
+                }
+            )
 
         except Exception as e:
             return Response({"status": "error", "message": str(e)}, status=400)
@@ -837,7 +895,7 @@ class DocumentAnalysisView(APIView):
         
         if serializer.is_valid():
             uploaded_file = serializer.validated_data['file']
-            
+
             # --- ROBUST BOOLEAN EXTRACTION ---
             # 1. Try to get boolean from validated data
             ce_provided = serializer.validated_data.get('ce_activity_date_provided')
@@ -850,35 +908,46 @@ class DocumentAnalysisView(APIView):
                     ce_provided = True
 
             try:
-                full_text = ""
-                if uploaded_file.name.lower().endswith('.docx'):
-                    doc = DocxParser().parse(uploaded_file)
-                    full_text = doc.text.get("full_text", "")
-                elif uploaded_file.name.lower().endswith('.pdf'):
-                    doc = PdfParser().parse(uploaded_file)
-                    full_text = doc.text.get("full_text", "")
-                else:
-                    return Response({"error": "Unsupported file type"}, status=400)
+                lower_name = uploaded_file.name.lower()
 
-                # We pass None for dates, so the Service will default them to date.today()
+                # Initialize validator configuration (independent of parsing)
                 validator = ReferenceValidatorService(
                     project_date=None,
                     passout_date=None,
                     ce_activity_date_provided=ce_provided
                 )
-                
-                report = validator.process_document_text(full_text)
-                result = get_or_create_file_report(uploaded_file, "reference_validation", report)
 
-                return Response({
-                    "status": "success",
-                    "filename": uploaded_file.name,
-                    "config_used": {
-                        "date_used": str(validator.project_date),
-                        "ce_provided": validator.ce_activity_date_provided
+                # 1) If report already exists for this file, reuse it (no re-parse)
+                cache_info = get_or_create_file_report(
+                    uploaded_file, "reference_validation"
+                )
+                if cache_info.get("from_cache"):
+                    report = cache_info.get("report_data") or {}
+                else:
+                    # 2) Ensure supported type and obtain (or build) unified document
+                    if not (lower_name.endswith('.docx') or lower_name.endswith('.pdf')):
+                        return Response({"error": "Unsupported file type"}, status=400)
+
+                    unified_doc, _ = get_or_create_unified_document(uploaded_file)
+                    full_text = unified_doc.text.get("full_text", "") or ""
+
+                    report = validator.process_document_text(full_text)
+                    get_or_create_file_report(
+                        uploaded_file, "reference_validation", report
+                    )
+
+                return Response(
+                    {
+                        "status": "success",
+                        "filename": uploaded_file.name,
+                        "config_used": {
+                            "date_used": str(validator.project_date),
+                            "ce_provided": validator.ce_activity_date_provided,
+                        },
+                        "report": report,
                     },
-                    "report": report
-                }, status=status.HTTP_200_OK)
+                    status=status.HTTP_200_OK,
+                )
 
             except Exception as e:
                 return Response({"status": "error", "message": str(e)}, status=500)
@@ -964,18 +1033,20 @@ class CalculationValidationView(APIView):
         # Optional: Allow custom tolerance
         tolerance = float(request.data.get('tolerance', 0.01))
         
-        # Parse document based on type
+        # Parse document based on type (using cached unified document when available)
         try:
             if filename.endswith('.pdf'):
                 source_type = 'pdf'
-                parser = PdfParser()
-                unified_doc = parser.parse(file_obj, enable_ocr=True)
             elif filename.endswith('.docx'):
                 source_type = 'docx'
-                parser = DocxParser()
-                unified_doc = parser.parse(file_obj)
             else:
-                raise ValidationError("Unsupported file type. Please upload .pdf or .docx")
+                raise ValidationError(
+                    "Unsupported file type. Please upload .pdf or .docx"
+                )
+
+            unified_doc, _ = get_or_create_unified_document(
+                file_obj, enable_ocr=True
+            )
             
             # Initialize validator
             validator = CalculationValidator(tolerance=tolerance)
@@ -1078,6 +1149,14 @@ class AccessibilityValidationView(APIView):
         if not (filename.endswith('.pdf') or filename.endswith('.docx')):
             raise ValidationError("Unsupported file type. Please upload .pdf or .docx")
 
+        # If we've already computed accessibility validation for this file, reuse it
+        cache_info = get_or_create_file_report(
+            file_obj, "accessibility_validation"
+        )
+        if cache_info.get("from_cache"):
+            cached_response = cache_info.get("report_data") or {}
+            return Response(cached_response, status=status.HTTP_200_OK)
+
         try:
             validator = AccessibilityValidator()
             report = validator.validate(file_obj)
@@ -1162,17 +1241,19 @@ class OllamaCalculationValidationView(APIView):
         filename = file_obj.name.lower()
         
         try:
-            # Parse document based on type using existing parsers
+            # Parse document based on type using shared unified-document cache
             if filename.endswith('.pdf'):
                 source_type = 'pdf'
-                parser = PdfParser()
-                unified_doc = parser.parse(file_obj, enable_ocr=True)
             elif filename.endswith('.docx'):
                 source_type = 'docx'
-                parser = DocxParser()
-                unified_doc = parser.parse(file_obj)
             else:
-                raise ValidationError("Unsupported file type. Please upload .pdf or .docx")
+                raise ValidationError(
+                    "Unsupported file type. Please upload .pdf or .docx"
+                )
+
+            unified_doc, _ = get_or_create_unified_document(
+                file_obj, enable_ocr=True
+            )
             
             # Initialize AI validator
             validator = AICalculationValidator()
@@ -1260,17 +1341,19 @@ class CodeValidationView(APIView):
         filename = file_obj.name.lower()
         
         try:
-            # Parse document based on type using existing parsers
+            # Parse document based on type using shared unified-document cache
             if filename.endswith('.pdf'):
                 source_type = 'pdf'
-                parser = PdfParser()
-                unified_doc = parser.parse(file_obj, enable_ocr=True)
             elif filename.endswith('.docx'):
                 source_type = 'docx'
-                parser = DocxParser()
-                unified_doc = parser.parse(file_obj)
             else:
-                raise ValidationError("Unsupported file type. Please upload .pdf or .docx")
+                raise ValidationError(
+                    "Unsupported file type. Please upload .pdf or .docx"
+                )
+
+            unified_doc, _ = get_or_create_unified_document(
+                file_obj, enable_ocr=True
+            )
             
             # Initialize AI code validator
             validator = AICodeValidator()

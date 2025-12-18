@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import hashlib
-from typing import IO
+import os
+from typing import IO, Tuple
 
 from django.core.files.uploadedfile import UploadedFile
+from django.core.exceptions import ObjectDoesNotExist
 
-from documents.domain import UnifiedDocument
+from documents.domain import DocumentImage, SectionNode, UnifiedDocument
 
 
 def calculate_file_hash(file_obj: IO[bytes] | UploadedFile) -> str:
@@ -70,4 +72,127 @@ def save_parsed_document(
     )
 
     return parsed_doc
+
+
+def _build_section_tree(payload: dict) -> SectionNode:
+    """Reconstruct a SectionNode (and its children) from stored JSON."""
+    if not isinstance(payload, dict):
+        # Fallback to an empty top-level node if structure is unexpected
+        return SectionNode(title=str(payload), level=1)
+
+    children_payload = payload.get("children") or []
+    children = [
+        _build_section_tree(child) for child in children_payload if isinstance(child, dict)
+    ]
+
+    return SectionNode(
+        title=str(payload.get("title", "")),
+        level=int(payload.get("level", 1) or 1),
+        paragraphs=list(payload.get("paragraphs") or []),
+        children=children,
+    )
+
+
+def _build_sections_list(sections_json) -> list[SectionNode]:
+    if not sections_json:
+        return []
+    return [_build_section_tree(item) for item in sections_json]
+
+
+def _build_images_list(images_json) -> list[DocumentImage]:
+    if not images_json:
+        return []
+
+    images: list[DocumentImage] = []
+    for item in images_json:
+        if not isinstance(item, dict):
+            continue
+        images.append(
+            DocumentImage(
+                identifier=str(
+                    item.get("id")
+                    or item.get("identifier")
+                    or "image-unknown"
+                ),
+                mime_type=str(item.get("mime_type") or "application/octet-stream"),
+                width=int(item.get("width") or 0),
+                height=int(item.get("height") or 0),
+                data=item.get("data"),
+                metadata=item.get("metadata") or {},
+            )
+        )
+    return images
+
+
+def build_unified_document_from_parsed(parsed_doc) -> UnifiedDocument:
+    """
+    Reconstruct a UnifiedDocument instance from a ParsedDocument model.
+    This avoids re-parsing the original binary document.
+    """
+    sections = _build_sections_list(getattr(parsed_doc, "sections_json", []))
+    images = _build_images_list(getattr(parsed_doc, "images_json", []))
+
+    return UnifiedDocument(
+        source_type=getattr(parsed_doc, "source_type", "unknown"),
+        metadata=getattr(parsed_doc, "metadata_json", {}) or {},
+        sections=sections,
+        text=getattr(parsed_doc, "text_json", {}) or {},
+        tables=getattr(parsed_doc, "tables_json", []) or [],
+        images=images,
+        extras=getattr(parsed_doc, "extras_json", {}) or {},
+    )
+
+
+def get_or_create_unified_document(
+    uploaded_file: UploadedFile, *, enable_ocr: bool = True
+) -> Tuple[UnifiedDocument, object]:
+    """
+    Return a UnifiedDocument for the given uploaded file, reusing cached
+    parsed data when available.
+
+    - If a ParsedDocument already exists for this file hash, rebuild the
+      UnifiedDocument from that JSON (no binary parsing).
+    - Otherwise, parse the binary using the appropriate parser, persist it,
+      and return the fresh UnifiedDocument.
+    """
+    # Local imports to avoid circular dependencies
+    from documents.models import Document, ParsedDocument
+    from documents.services.docx_parser import DocxParser
+    from documents.services.pdf_parser import PdfParser
+
+    # 1) Look up by stable SHA256 content hash
+    file_hash = calculate_file_hash(uploaded_file)
+    uploaded_file.seek(0)
+
+    document = (
+        Document.objects.filter(file_hash=file_hash)
+        .select_related("parsed_data")
+        .first()
+    )
+
+    if document:
+        try:
+            parsed_doc = document.parsed_data  # OneToOne relation
+        except ObjectDoesNotExist:
+            parsed_doc = None
+
+        if parsed_doc:
+            unified = build_unified_document_from_parsed(parsed_doc)
+            return unified, parsed_doc
+
+    # 2) No cached parse exists: parse now and persist it
+    name = (getattr(uploaded_file, "name", "") or "").lower()
+    _root, ext = os.path.splitext(name)
+
+    if ext == ".pdf":
+        parser = PdfParser()
+        unified = parser.parse(uploaded_file, enable_ocr=enable_ocr)
+    else:
+        # Default to DOCX parser; validation layers already restrict types.
+        parser = DocxParser()
+        unified = parser.parse(uploaded_file)
+
+    parsed_doc = save_parsed_document(uploaded_file, unified)
+    return unified, parsed_doc
+
 
