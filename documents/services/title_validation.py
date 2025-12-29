@@ -1,8 +1,8 @@
-from typing import List, IO
+from typing import List, IO, Optional
 from rest_framework.exceptions import ValidationError
 import pdfplumber
 import docx
-
+import re
 class TitleValidationService:
     def validate_and_extract_title(self, file_obj: IO[bytes]) -> str | None:
         file_name = file_obj.name.lower()
@@ -14,12 +14,53 @@ class TitleValidationService:
             return self.extract_from_pdf(file_obj)
         else:
             raise ValidationError("Unsupported file type")
+    def _extract_title_from_career_episode_pattern(self, text: str) -> Optional[str]:
+        """
+        Extract title from pattern: "Career Episode [integer] ... [Title] ... [integer].1 Introduction"
+        """
+        # Case-insensitive search
+        pattern = r'(?:career|carrer)\s+episode\s+(\d+)'
+        match = re.search(pattern, text, re.IGNORECASE)
+        
+        if not match:
+            return None
+        
+        episode_number = match.group(1)
+        start_pos = match.end()
+        
+     
+        # Pattern: [episode_number].1 Introduction (e.g., 1.1 Introduction if Career Episode is 1)
+        intro_pattern = rf'{re.escape(episode_number)}\.1\s+introduction'
+        intro_match = re.search(intro_pattern, text[start_pos:], re.IGNORECASE)
+        
+        if not intro_match:
+            return None
+        
+        # Extract title between "Career Episode [number]" and "[number].1 Introduction"
+        title_text = text[start_pos:start_pos + intro_match.start()].strip()
+        
+        # Clean up the title (remove extra whitespace, newlines)
+        title_text = re.sub(r'\s+', ' ', title_text).strip()
+        
+        if title_text:
+            return title_text
+        
+        return None
+    
     
     def extract_from_docx(self, file_obj: IO[bytes]) -> str | None:
         try:
             document = docx.Document(file_obj)
         except Exception:
             raise ValidationError("Invalid DOCX file")
+        
+        # First, check for "Career Episode" pattern (initial case)
+        # Extract text from first 50 paragraphs to search for the pattern
+        full_text = " ".join([p.text for p in document.paragraphs[:50]])
+        career_episode_title = self._extract_title_from_career_episode_pattern(full_text)
+        if career_episode_title:
+            print(f"DEBUG: Found title from Career Episode pattern: {career_episode_title}")
+            return career_episode_title
 
         for paragraph in document.paragraphs[:50]:
             if paragraph.style.name.lower() == "title" and paragraph.text.strip():
@@ -64,6 +105,20 @@ class TitleValidationService:
             with pdfplumber.open(file_obj) as pdf:
                 if not pdf.pages:
                     return None
+                
+                # Extract text from first 3 pages to search for the pattern
+                full_text = ""
+                for page_num in range(min(3, len(pdf.pages))):
+                    page = pdf.pages[page_num]
+                    page_text = page.extract_text()
+                    if page_text:
+                        full_text += page_text + " "
+                
+                if full_text:
+                    career_episode_title = self._extract_title_from_career_episode_pattern(full_text)
+                    if career_episode_title:
+                        print(f"DEBUG: Found title from Career Episode pattern in PDF: {career_episode_title}")
+                        return career_episode_title
                 
                 for page_num in range(min(3, len(pdf.pages))):
                     page = pdf.pages[page_num]
