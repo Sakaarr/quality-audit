@@ -6,7 +6,10 @@ import io
 import statistics
 from typing import List, Tuple
 
-import pdfplumber
+try:
+    import fitz  # PyMuPDF
+except ImportError:
+    import pymupdf as fitz 
 import pytesseract
 from django.conf import settings
 from pdf2image import convert_from_bytes
@@ -15,7 +18,7 @@ from documents.domain import DocumentImage, SectionNode, UnifiedDocument
 
 
 class PdfParser:
-    """Parses PDF documents with layout, table, image, and OCR support."""
+    """Parses PDF documents with layout, table, image, and OCR support using PyMuPDF."""
 
     def parse(self, uploaded_file, *, enable_ocr: bool = True) -> UnifiedDocument:
         raw_bytes = uploaded_file.read()
@@ -23,12 +26,16 @@ class PdfParser:
 
         ocr_used = False
 
-        with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
-            metadata = self._extract_metadata(pdf)
-            full_text, page_blocks, section_inputs = self._extract_text(pdf)
-            tables = self._extract_tables(pdf)
-            images = []
-            sections = self._infer_sections(section_inputs)
+        # Open PDF with PyMuPDF
+        pdf = fitz.open(stream=raw_bytes, filetype="pdf")
+        
+        metadata = self._extract_metadata(pdf)
+        full_text, page_blocks, section_inputs = self._extract_text(pdf)
+        tables = self._extract_tables(pdf)
+        images = self._extract_images(pdf)
+        sections = self._infer_sections(section_inputs)
+        
+        pdf.close()
 
         # if enable_ocr and not full_text.strip():
         #     ocr_text, ocr_pages = self._ocr_fallback(raw_bytes)
@@ -54,72 +61,108 @@ class PdfParser:
             },
         )
 
-    def _extract_metadata(self, pdf: pdfplumber.PDF) -> dict:
+    def _extract_metadata(self, pdf: fitz.Document) -> dict:
         metadata = {}
-        if pdf.metadata:
+        pdf_metadata = pdf.metadata
+        
+        if pdf_metadata:
             metadata = {
-                "author": pdf.metadata.get("Author"),
-                "creator": pdf.metadata.get("Creator"),
-                "producer": pdf.metadata.get("Producer"),
-                "subject": pdf.metadata.get("Subject"),
-                "title": pdf.metadata.get("Title"),
-                "created": pdf.metadata.get("CreationDate"),
-                "modified": pdf.metadata.get("ModDate"),
+                "author": pdf_metadata.get("author"),
+                "creator": pdf_metadata.get("creator"),
+                "producer": pdf_metadata.get("producer"),
+                "subject": pdf_metadata.get("subject"),
+                "title": pdf_metadata.get("title"),
+                "created": pdf_metadata.get("creationDate"),
+                "modified": pdf_metadata.get("modDate"),
             }
 
-        metadata["page_count"] = len(pdf.pages)
+        metadata["page_count"] = pdf.page_count
         metadata["has_text_content"] = any(
-            bool((page.extract_text() or "").strip()) for page in pdf.pages
+            bool(page.get_text().strip()) for page in pdf
         )
         metadata["page_dimensions"] = [
-            {"width": page.width, "height": page.height} for page in pdf.pages
+            {"width": page.rect.width, "height": page.rect.height} 
+            for page in pdf
         ]
         return {key: value for key, value in metadata.items() if value not in (None, "", [])}
 
-    def _extract_text(self, pdf: pdfplumber.PDF) -> Tuple[str, List[dict], List[dict]]:
+    def _extract_text(self, pdf: fitz.Document) -> Tuple[str, List[dict], List[dict]]:
         combined_text_chunks: List[str] = []
         page_payloads: List[dict] = []
         section_inputs: List[dict] = []
 
-        for index, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text() or ""
+        for page_num in range(pdf.page_count):
+            page = pdf[page_num]
+            index = page_num + 1
+            
+            # Extract plain text
+            text = page.get_text()
             if text.strip():
                 combined_text_chunks.append(text.strip())
 
-            words = page.extract_words(
-                use_text_flow=True,
-                extra_attrs=["fontname", "size", "adv", "upright"],
-            )
+            # Extract detailed word information
+            blocks = page.get_text("dict")["blocks"]
+            words = []
             font_buckets: dict[str, dict] = {}
             font_order: List[str] = []
-            for word in words:
-                font_name = word.get("fontname") or "unknown"
-                bucket = font_buckets.setdefault(
-                    font_name,
-                    {
-                        "font": font_name,
-                        "segments": [],
-                        "font_sizes": set(),
-                    },
-                )
-                if font_name not in font_order:
-                    font_order.append(font_name)
-                bucket["segments"].append(
-                    {
-                        "text": word["text"],
-                        "x0": float(word["x0"]),
-                        "x1": float(word["x1"]),
-                        "top": float(word["top"]),
-                    }
-                )
-                size_value = word.get("size")
-                if isinstance(size_value, (int, float)):
-                    bucket["font_sizes"].add(float(size_value))
+            
+            for block in blocks:
+                if block.get("type") == 0:  # Text block
+                    for line in block.get("lines", []):
+                        for span in line.get("spans", []):
+                            span_text = span.get("text", "")
+                            font_name = span.get("font", "unknown")
+                            font_size = span.get("size", 0)
+                            bbox = span.get("bbox", [0, 0, 0, 0])
+                            
+                            # Split span into words
+                            span_words = span_text.split()
+                            if not span_words:
+                                continue
+                            
+                            # Approximate word positions within span
+                            x0, y0, x1, y1 = bbox
+                            word_width = (x1 - x0) / len(span_words) if span_words else 0
+                            
+                            for i, word_text in enumerate(span_words):
+                                word_x0 = x0 + (i * word_width)
+                                word_x1 = word_x0 + word_width
+                                
+                                word = {
+                                    "text": word_text,
+                                    "x0": float(word_x0),
+                                    "x1": float(word_x1),
+                                    "top": float(y0),
+                                    "fontname": font_name,
+                                    "size": float(font_size),
+                                }
+                                words.append(word)
+                                
+                                # Build font buckets
+                                bucket = font_buckets.setdefault(
+                                    font_name,
+                                    {
+                                        "font": font_name,
+                                        "segments": [],
+                                        "font_sizes": set(),
+                                    },
+                                )
+                                if font_name not in font_order:
+                                    font_order.append(font_name)
+                                
+                                bucket["segments"].append({
+                                    "text": word_text,
+                                    "x0": float(word_x0),
+                                    "x1": float(word_x1),
+                                    "top": float(y0),
+                                })
+                                bucket["font_sizes"].add(float(font_size))
 
+            # Build serialized words structure
             serialized_words = {}
             for font_name in font_order:
                 bucket = font_buckets[font_name]
-                entry = {"text": self._segments_to_words(bucket["segments"])}
+                entry = {"text": [seg["text"] for seg in bucket["segments"]]}
                 sizes = bucket["font_sizes"]
                 if len(sizes) == 1:
                     entry["font_size"] = next(iter(sizes))
@@ -152,14 +195,15 @@ class PdfParser:
             }
             page_payloads.append(page_payload)
 
+            # Section words for section inference
             section_words = [
                 {
                     "text": word["text"],
-                    "x0": float(word["x0"]),
-                    "x1": float(word["x1"]),
-                    "top": float(word["top"]),
+                    "x0": word["x0"],
+                    "x1": word["x1"],
+                    "top": word["top"],
                     "font": word.get("fontname"),
-                    "font_size": float(word.get("size") or 0),
+                    "font_size": word.get("size", 0),
                 }
                 for word in words
             ]
@@ -168,63 +212,73 @@ class PdfParser:
         full_text = "\n\n".join(combined_text_chunks)
         return full_text, page_payloads, section_inputs
 
-    def _extract_tables(self, pdf: pdfplumber.PDF) -> List[dict]:
+    def _extract_tables(self, pdf: fitz.Document) -> List[dict]:
+        """
+        PyMuPDF doesn't have built-in table extraction like pdfplumber.
+        You can use camelot-py or tabula-py for table extraction.
+        For now, returning empty list.
+        """
         tables = []
-        for page_number, page in enumerate(pdf.pages, start=1):
-            for table_index, table in enumerate(page.extract_tables() or [], start=1):
-                normalized_rows = [
-                    [cell.strip() if isinstance(cell, str) else "" for cell in row]
-                    for row in table
-                ]
-                tables.append(
-                    {
-                        "id": f"pdf-table-{page_number}-{table_index}",
-                        "page_number": page_number,
-                        "row_count": len(normalized_rows),
-                        "column_count": len(normalized_rows[0]) if normalized_rows else 0,
-                        "data": normalized_rows,
-                    }
-                )
+        # Note: PyMuPDF doesn't have native table extraction
+        # You would need to integrate with camelot-py or tabula-py
+        # Or implement custom table detection logic
         return tables
 
-    def _extract_images(self, pdf: pdfplumber.PDF) -> List[DocumentImage]:
+    def _extract_images(self, pdf: fitz.Document) -> List[DocumentImage]:
         images: List[DocumentImage] = []
 
-        for page_number, page in enumerate(pdf.pages, start=1):
-            if not page.images:
+        for page_number in range(pdf.page_count):
+            page = pdf[page_number]
+            image_list = page.get_images(full=True)
+            
+            if not image_list:
                 continue
 
-            for image_index, image_obj in enumerate(page.images, start=1):
-                x0 = float(image_obj["x0"])
-                x1 = float(image_obj["x1"])
-                top = float(image_obj["top"])
-                bottom = float(image_obj["bottom"])
-                bbox = (min(x0, x1), min(top, bottom), max(x0, x1), max(top, bottom))
+            for image_index, img in enumerate(image_list, start=1):
+                xref = img[0]
+                
                 try:
-                    cropped_page = page.crop(bbox)
-                    pil_image = cropped_page.to_image(resolution=200).original
-                except Exception:
-                    continue
-
-                buffer = io.BytesIO()
-                pil_image.save(buffer, format="PNG")
-                payload = buffer.getvalue()
-                encoded = base64.b64encode(payload).decode("utf-8")
-
-                images.append(
-                    DocumentImage(
-                        identifier=f"pdf-image-{page_number}-{image_index}",
-                        mime_type="image/png",
-                        width=pil_image.width,
-                        height=pil_image.height,
-                        data=encoded,
-                        metadata={
-                            "page": page_number,
-                            "bbox": bbox,
-                            "area": abs((x1 - x0) * (bottom - top)),
-                        },
+                    base_image = pdf.extract_image(xref)
+                    image_bytes = base_image["image"]
+                    image_ext = base_image["ext"]
+                    
+                    # Convert to PNG if needed
+                    if image_ext != "png":
+                        pix = fitz.Pixmap(image_bytes)
+                        if pix.alpha:
+                            pix = fitz.Pixmap(fitz.csRGB, pix)
+                        image_bytes = pix.tobytes("png")
+                        pix = None
+                    
+                    encoded = base64.b64encode(image_bytes).decode("utf-8")
+                    
+                    # Get image position on page
+                    img_rects = page.get_image_rects(xref)
+                    bbox = img_rects[0] if img_rects else fitz.Rect(0, 0, 0, 0)
+                    
+                    # Get actual image dimensions
+                    pix = fitz.Pixmap(image_bytes)
+                    width = pix.width
+                    height = pix.height
+                    pix = None
+                    
+                    images.append(
+                        DocumentImage(
+                            identifier=f"pdf-image-{page_number + 1}-{image_index}",
+                            mime_type="image/png",
+                            width=width,
+                            height=height,
+                            data=encoded,
+                            metadata={
+                                "page": page_number + 1,
+                                "bbox": (bbox.x0, bbox.y0, bbox.x1, bbox.y1),
+                                "area": bbox.width * bbox.height,
+                            },
+                        )
                     )
-                )
+                except Exception as e:
+                    print(f"Error extracting image {image_index} from page {page_number + 1}: {e}")
+                    continue
 
         return images
 
@@ -271,7 +325,7 @@ class PdfParser:
         return sections
 
     def _group_words_by_line(self, words: List[dict]) -> List[dict]:
-        """Group words into lines, properly handling single-character words."""
+        """Group words into lines based on vertical position."""
         if not words:
             return []
 
@@ -285,7 +339,7 @@ class PdfParser:
         lines = []
         current_line_words = []
         current_top = None
-        tolerance = 3.0
+        tolerance = 5.0
 
         for word in sorted_words:
             top = float(word.get("top", 0))
@@ -297,7 +351,7 @@ class PdfParser:
                 if current_line_words:
                     lines.append({
                         "top": current_top,
-                        "words": self._group_line_words(current_line_words)
+                        "words": current_line_words
                     })
                 current_line_words = [word]
                 current_top = top
@@ -306,192 +360,10 @@ class PdfParser:
         if current_line_words:
             lines.append({
                 "top": current_top if current_top is not None else 0,
-                "words": self._group_line_words(current_line_words)
+                "words": current_line_words
             })
 
         return lines
-
-    def _group_line_words(self, line_words: List[dict]) -> List[dict]:
-        """Group single-character words into multi-character words within a line."""
-        if not line_words:
-            return []
-        
-        # Calculate gap threshold using percentile-based approach
-        gaps = []
-        widths = []
-        
-        for i in range(len(line_words) - 1):
-            curr_word = line_words[i]
-            next_word = line_words[i + 1]
-            
-            # Get x1 from current word, fallback to x0 if x1 not available
-            x1_curr = float(curr_word.get("x1", curr_word.get("x0", 0)))
-            x0_next = float(next_word.get("x0", 0))
-            gap = x0_next - x1_curr
-            
-            if gap >= 0:  # Only consider positive gaps
-                gaps.append(gap)
-            
-            # Track character widths
-            x0 = float(curr_word.get("x0", 0))
-            x1 = float(curr_word.get("x1", curr_word.get("x0", 0)))
-            if x1 > x0:
-                widths.append(x1 - x0)
-        
-        # Use percentile-based threshold
-        if gaps:
-            gaps_sorted = sorted(gaps)
-            # Use 75th percentile - more aggressive grouping for character-by-character extraction
-            percentile_75_idx = int(len(gaps_sorted) * 0.75)
-            gap_threshold = gaps_sorted[percentile_75_idx] if percentile_75_idx < len(gaps_sorted) else gaps_sorted[-1]
-            # Ensure minimum threshold - be more aggressive for character grouping
-            avg_char_width = statistics.mean(widths) if widths else 5.0
-            gap_threshold = max(gap_threshold, avg_char_width * 0.5)
-        else:
-            avg_char_width = statistics.mean(widths) if widths else 5.0
-            gap_threshold = avg_char_width * 1.5
-        
-        # Group words based on spatial proximity
-        grouped_words = []
-        current_group = []
-        prev_word = None
-        
-        for word in line_words:
-            text = (word.get("text") or "").strip()
-            if not text:
-                continue
-                
-            # If this is already a multi-character word, add it as-is
-            if len(text) > 1:
-                if current_group:
-                    grouped_words.append(self._merge_word_group(current_group))
-                    current_group = []
-                grouped_words.append(word)
-                prev_word = word
-                continue
-            
-            # Single character - check if it continues previous word
-            if prev_word is None:
-                current_group = [word]
-            else:
-                # Get x1 from previous word, with fallback
-                prev_x1 = float(prev_word.get("x1", prev_word.get("x0", 0)))
-                curr_x0 = float(word.get("x0", 0))
-                gap = curr_x0 - prev_x1
-                
-                if gap <= gap_threshold:
-                    # Continue current word group
-                    current_group.append(word)
-                else:
-                    # Start new word group
-                    if current_group:
-                        grouped_words.append(self._merge_word_group(current_group))
-                    current_group = [word]
-            
-            prev_word = word
-        
-        # Add final group
-        if current_group:
-            grouped_words.append(self._merge_word_group(current_group))
-        
-        return grouped_words
-
-    def _merge_word_group(self, word_group: List[dict]) -> dict:
-        """Merge a group of single-character words into one word dict."""
-        if not word_group:
-            return {}
-        
-        merged_text = "".join(w.get("text", "") for w in word_group)
-        
-        # Get x1 from the last word in the group (rightmost position)
-        x1 = float(word_group[-1].get("x1", word_group[-1].get("x0", 0)))
-        
-        return {
-            "text": merged_text,
-            "x0": float(word_group[0].get("x0", 0)),
-            "x1": x1,
-            "top": float(word_group[0].get("top", 0)),
-            "font": word_group[0].get("font"),
-            "font_size": max(
-                float(w.get("font_size", 0)) for w in word_group
-            )
-        }
-
-    def _segments_to_words(self, segments: List[dict]) -> List[str]:
-        """Group character-level segments into words based on spatial proximity."""
-        if not segments:
-            return []
-
-        # Sort segments by top position, then x0 (left to right, top to bottom)
-        sorted_segs = sorted(
-            segments,
-            key=lambda s: (round(float(s.get("top", 0)), 1), float(s.get("x0", 0))),
-        )
-
-        # Calculate average character width to determine word gaps
-        widths = [
-            seg["x1"] - seg["x0"]
-            for seg in sorted_segs
-            if isinstance(seg.get("x1"), (int, float))
-            and isinstance(seg.get("x0"), (int, float))
-            and seg["x1"] > seg["x0"]
-        ]
-        avg_char_width = statistics.mean(widths) if widths else 5.0
-        gap_threshold = avg_char_width * 2.0
-        line_tolerance = 3.0
-
-        words = []
-        current_word = ""
-        prev_seg = None
-
-        for seg in sorted_segs:
-            text = (seg.get("text") or "").strip()
-            if not text:
-                if current_word:
-                    words.append(current_word)
-                    current_word = ""
-                prev_seg = None
-                continue
-
-            # If segment is already a word (multiple characters), add it directly
-            if len(text) > 1:
-                if current_word:
-                    words.append(current_word)
-                    current_word = ""
-                words.append(text)
-                prev_seg = seg
-                continue
-
-            # Single character - check if it continues the current word
-            if prev_seg is None:
-                current_word = text
-            else:
-                # Check if same line and within gap threshold
-                same_line = (
-                    abs(float(seg.get("top", 0)) - float(prev_seg.get("top", 0)))
-                    <= line_tolerance
-                )
-                gap = (
-                    float(seg.get("x0", 0)) - float(prev_seg.get("x1", 0))
-                    if same_line
-                    else float("inf")
-                )
-
-                if same_line and gap <= gap_threshold:
-                    # Continue current word
-                    current_word += text
-                else:
-                    # Start new word
-                    if current_word:
-                        words.append(current_word)
-                    current_word = text
-
-            prev_seg = seg
-
-        if current_word:
-            words.append(current_word)
-
-        return words
 
     def _ocr_fallback(self, raw_bytes: bytes) -> Tuple[str, List[dict]]:
         poppler_path = getattr(settings, "POPPLER_PATH", None)
