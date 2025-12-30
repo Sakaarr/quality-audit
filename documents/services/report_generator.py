@@ -744,14 +744,17 @@ def generate_google_search_section(search_data: Dict[str, Any]) -> str:
         
     items_html = []
     for res in results:
-        term = res.get('term', '')
+        title = res.get('title', '')
+        # Fallback if title is empty/missing but term exists (legacy support)
+        if not title:
+            title = res.get('term', '')
+
         error = res.get('error')
         
         if error:
             # Handle error case
             status_badge = 'ERROR'
             status_bg = '#d32f2f'
-            # Extract a friendly message if possible, otherwise show truncation
             error_msg = str(error)
             if "Quota exceeded" in error_msg:
                 detail_msg = "Google Search Quota Exceeded"
@@ -760,7 +763,7 @@ def generate_google_search_section(search_data: Dict[str, Any]) -> str:
                 
             items_html.append(f'''
             <div class="search-item">
-                <div class="search-term">"{term}"</div>
+                <div class="search-term">"{title}"</div>
                 <div class="search-meta">
                     <span class="search-status" style="background: {status_bg};">{status_badge}</span>
                     <span class="search-conf" style="color: #d32f2f;">{detail_msg}</span>
@@ -768,28 +771,32 @@ def generate_google_search_section(search_data: Dict[str, Any]) -> str:
             </div>
             ''')
         else:
-            # Handle normal case
+            # Found means it exists online -> Plagiarized/Not Unique
             found = res.get('found', False)
-            confidence = res.get('confidence_score', 0)
-            label = res.get('confidence_label', 'Low')
             
-            status_badge = 'FOUND' if found else 'NOT FOUND'
-            status_bg = '#2e7d32' if found else '#d32f2f'
+            if found:
+                status_badge = 'FOUND'
+                status_bg = '#d32f2f' # Red
+                status_desc = 'Title found in Google Search Results'
+            else:
+                status_badge = 'NOT FOUND'
+                status_bg = '#2e7d32' # Green
+                status_desc = 'Title not found in Google Search'
             
             items_html.append(f'''
             <div class="search-item">
-                <div class="search-term">"{term}"</div>
+                <div class="search-term">"{title}"</div>
                 <div class="search-meta">
                     <span class="search-status" style="background: {status_bg};">{status_badge}</span>
-                    <span class="search-conf">Confidence: {confidence}% ({label})</span>
+                    <span class="search-conf">{status_desc}</span>
                 </div>
             </div>
             ''')
         
     return f'''
     <section class="google-search-section">
-        <h2>6. Fact Check</h2>
-        <p>Verified sentences against external sources (Google Search).</p>
+        <h2>6. Google Search Validation</h2>
+        <p>Verified title uniqueness against external sources (Google Search).</p>
         <div class="search-results">
             {''.join(items_html)}
         </div>
