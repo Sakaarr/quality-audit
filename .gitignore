@@ -49,3 +49,5 @@ htmlcov/
 
 # Keep migrations in git (remove this line if you want to ignore)
 # migrations/
+media/
+hashFiles/

@@ -451,7 +451,6 @@ class TitleValidationView(APIView):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
         file_obj = serializer.validated_data["file"]
-
         # First, try to reuse cached title validation for this file
         cache_info = get_or_create_file_report(file_obj, "title_validation")
         if cache_info.get("from_cache"):
@@ -589,7 +588,6 @@ class SectionValidationView(APIView):
                 "details": {"total_required": 0, "found_count": 0}
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 class GoogleSearchValidationView(APIView):
     parser_classes = [MultiPartParser, FormParser]
     permission_classes = [AllowAny]
@@ -604,15 +602,11 @@ class GoogleSearchValidationView(APIView):
                     OpenApiExample(
                         "GoogleSearchValidationResponse",
                         value={
-                            "total_sentences_checked": 3,
+                            "total_sentences_checked": 1,
                             "results": [
                                 {
-                                    "term": "TensorFlow is an open source machine learning library.",
-                                    "found": True,
-                                    "confidence_score": 95,
-                                    "confidence_label": "High",
-                                    "total_results": "150000",
-                                    "top_results": [{"title": "TensorFlow", "link": "..."}]
+                                    "title": "Design of Vhcl AdtaR-TmEryNS",
+                                    "found": True
                                 }
                             ]
                         },
@@ -645,26 +639,16 @@ class GoogleSearchValidationView(APIView):
         unified_doc, _ = get_or_create_unified_document(file_obj)
         text = unified_doc.text.get("full_text", "") or ""
 
-        # 2. Extract sentences
-        sentences = re.split(r'(?<=[.!?])\s+', text)
+        # 2. Extract title
+        service = TitleValidationService()
+        title = service.validate_and_extract_title(file_obj)
+        print(f"DEBUG: title in view: {title}")
         
-        candidates = []
-        seen = set()
-        
-        # Filter out duplicate sentences and short ones
-        for s in sentences:
-            s = s.strip()
-            if s in seen:
-                continue
-            # Filter out short sentences
-            if len(s) > 20 and " " in s:
-                candidates.append(s)
-                seen.add(s)
-
-        terms_to_check = candidates[:3]
         # 3. Validate with Google Search
         validator = GoogleSearchValidator()
-        results = validator.validate_terms(terms_to_check)
+        result = validator.validate_title(title)
+        results = [result]  # Wrap in list for consistent response format
+        
         get_or_create_file_report(file_obj, "google_search_validation", results)
         return Response(
             {
