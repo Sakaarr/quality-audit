@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-
+from datetime import datetime
 from django.http import request
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
 from rest_framework import status
@@ -47,6 +47,8 @@ from documents.services.accessibility_validator import AccessibilityValidator
 from documents.validator.OllamaValidator import AICalculationValidator
 from documents.validator.CodeValidator import AICodeValidator
 from documents.services.grammar_checker import GrammarAnalysisService
+
+from documents.services.visual_comparator import VisualComparator
 
 class BaseDocumentParserView(APIView):
     parser_classes = [MultiPartParser, FormParser]
@@ -1416,3 +1418,62 @@ class ReportGenerationView(APIView):
                 "status": "error",
                 "message": f"Failed to generate report: {str(e)}"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class VisualComparisonView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [AllowAny]
+    serializer_class = TitleComparisonSerializer  # Reusing file_1/file_2 serializer
+
+    @extend_schema(
+        request=TitleComparisonSerializer,
+        responses={
+            200: OpenApiResponse(
+                description="Visual comparison response",
+                examples=[
+                    OpenApiExample(
+                        "VisualComparisonResponse",
+                        value={
+                            "summary": {
+                                "file_1_total_images": 5,
+                                "file_2_total_images": 5,
+                                "common_images_count": 5,
+                                "similarity_score": 100.0
+                            }
+                        },
+                    )
+                ],
+            )
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        file_1 = serializer.validated_data["file_1"]
+        file_2 = serializer.validated_data["file_2"]
+
+        comparator = VisualComparator()
+        try:
+            result = comparator.compare(file_1, file_2)
+
+            # Persist results to File 1's report
+            get_or_create_file_report(file_1, "visual_comparison", {
+                "compared_with": file_2.name,
+                "summary": result["summary"],
+                "timestamp": str(datetime.now())
+            })
+
+            # Persist results to File 2's report
+            get_or_create_file_report(file_2, "visual_comparison", {
+                "compared_with": file_1.name,
+                "summary": result["summary"],
+                "timestamp": str(datetime.now())
+            })
+
+            return Response(result, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(
+                {"error": str(e)}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

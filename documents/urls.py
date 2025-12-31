@@ -19,6 +19,7 @@ from documents.views import (
     VisualValidationView,
     DocumentAnalysisView,
     AccessibilityValidationView,
+    VisualComparisonView,
 )
 
 
@@ -44,6 +45,7 @@ urlpatterns = [
     path("section/validate/", SectionValidationView.as_view(), name="section-validate"),
 
     path('visuals/validate/', VisualValidationView.as_view(), name='validate-visuals'),
+    path('visual/compare/', VisualComparisonView.as_view(), name='visual-compare'),
     path('reference/validate/', DocumentAnalysisView.as_view(), name='reference-validate'),
     path('accessibility/validate/', AccessibilityValidationView.as_view(), name='validate-accessibility'),
     path(

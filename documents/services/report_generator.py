@@ -300,7 +300,7 @@ def generate_html_report(report_data: Dict[str, Any]) -> str:
         {generate_google_search_section(reports.get('google_search_validation', {})) if reports.get('google_search_validation') else ''}
         
         <!-- Visual Validation -->
-        {generate_visual_validation_section(reports.get('visual_validation', {})) if reports.get('visual_validation') else ''}
+        {generate_visual_validation_section(reports.get('visual_validation', {}), reports.get('visual_comparison')) if reports.get('visual_validation') or reports.get('visual_comparison') else ''}
 
         <!-- Title Validation -->
         {generate_title_validation_section(reports.get('title_validation', {})) if reports.get('title_validation') else ''}
@@ -804,24 +804,23 @@ def generate_google_search_section(search_data: Dict[str, Any]) -> str:
     '''
 
 
-def generate_visual_validation_section(visual_data: Dict[str, Any]) -> str:
+def generate_visual_validation_section(visual_data: Dict[str, Any], comparison_data: Optional[Dict[str, Any]] = None) -> str:
     """Generate visual validation section HTML."""
-    if not visual_data:
+    if not visual_data and not comparison_data:
         return ''
         
     # Assuming visual_data structure based on usage
     issues = []
     score = None
     
+    stats = {}
     if isinstance(visual_data, dict):
         issues = visual_data.get('issues', [])
         score = visual_data.get('score', None)
-        # If dict is the issue list directly (unlikely based on views.py visual_validator logic)
-        if not issues and not score and 'issues' not in visual_data:
-             pass 
+        stats = visual_data.get('stats', {})
     elif isinstance(visual_data, list):
         issues = visual_data
-        
+
     # Formatting
     issues_html = ''
     if issues:
@@ -835,11 +834,52 @@ def generate_visual_validation_section(visual_data: Dict[str, Any]) -> str:
     if score is not None:
         score_html = f'<div class="visual-score">Visual Score: <strong>{score}</strong></div>'
 
+    stats_html = ''
+    if stats:
+        images = stats.get('images_processed', 0)
+        tables = stats.get('tables_processed', 0)
+        stats_html = f'''
+        <div class="visual-stats" style="margin-bottom: 15px; padding: 10px; background: #f5f5f5; border: 1px solid #ddd; display: flex; gap: 20px;">
+            <div class="stat-item">Images Processed: <strong>{images}</strong></div>
+            <div class="stat-item">Tables Processed: <strong>{tables}</strong></div>
+        </div>
+        '''
+
+    comparison_html = ''
+    if comparison_data:
+        comp_summary = comparison_data.get('summary', {})
+        other_file = comparison_data.get('compared_with', 'Unknown File')
+        
+        sim_score = comp_summary.get('similarity_score', 0)
+        common = comp_summary.get('common_images_count', 0)
+        self_cnt = comp_summary.get('file_1_total_images', 0) 
+        other_cnt = comp_summary.get('file_2_total_images', 0)
+        
+        comparison_html = f'''
+        <div class="visual-comparison" style="margin-top: 20px; padding: 15px; border: 1px solid #b3e5fc; background: #e1f5fe; border-radius: 5px;">
+            <h3 style="margin-top: 0; color: #0277bd; font-size: 11pt;">Cross-File Comparison</h3>
+            <p style="margin-bottom: 10px; font-style: italic;">Compared against: <strong>{other_file}</strong></p>
+            
+            <div style="display: flex; align-items: center; gap: 30px;">
+                <div class="comp-score">
+                    <span style="font-size: 18pt; font-weight: bold; color: {'#2e7d32' if sim_score > 99 else '#f57c00'}">{sim_score}%</span>
+                    <span style="display: block; font-size: 9pt; color: #555;">Match</span>
+                </div>
+                <div class="comp-details" style="font-size: 10pt;">
+                     <div>Common Images: <strong>{common}</strong></div>
+                     <div style="color: #666; font-size: 9pt;">(This File: {self_cnt} vs Other: {other_cnt})</div>
+                </div>
+            </div>
+        </div>
+        '''
+
     return f'''
     <section class="visual-section">
         <h2>7. Visual Validation</h2>
+        {stats_html}
         {score_html}
-        {issues_html or '<p>No visual issues detected. Document layout appears consistent.</p>'}
+        {comparison_html}
+        {issues_html or (f'<p>No visual issues detected. Document layout appears consistent.</p>' if not comparison_html else '')}
     </section>
     '''
 
