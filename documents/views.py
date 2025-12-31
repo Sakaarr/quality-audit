@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+
 from django.http import request
 from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
 from rest_framework import status
@@ -47,7 +48,6 @@ from documents.services.accessibility_validator import AccessibilityValidator
 from documents.validator.OllamaValidator import AICalculationValidator
 from documents.validator.CodeValidator import AICodeValidator
 from documents.services.grammar_checker import GrammarAnalysisService
-
 from documents.services.visual_comparator import VisualComparator
 
 class BaseDocumentParserView(APIView):
@@ -1408,7 +1408,7 @@ class ReportGenerationView(APIView):
                 get_or_create_file_report(file_obj, "_initialized", {})
             
             # Generate HTML report
-            html_content = generate_html_report(report_data)
+            html_content = generate_html_report(report_data, filename=file_obj.name)
             
             # Return HTML response
             return HttpResponse(html_content, content_type='text/html')
@@ -1458,16 +1458,24 @@ class VisualComparisonView(APIView):
             result = comparator.compare(file_1, file_2)
 
             # Persist results to File 1's report
+            summary_1 = result["summary"].copy()
+            summary_1["current_file_images"] = summary_1.get("file_1_total_images", 0)
+            summary_1["other_file_images"] = summary_1.get("file_2_total_images", 0)
+            
             get_or_create_file_report(file_1, "visual_comparison", {
                 "compared_with": file_2.name,
-                "summary": result["summary"],
+                "summary": summary_1,
                 "timestamp": str(datetime.now())
             })
 
             # Persist results to File 2's report
+            summary_2 = result["summary"].copy()
+            summary_2["current_file_images"] = summary_2.get("file_2_total_images", 0)
+            summary_2["other_file_images"] = summary_2.get("file_1_total_images", 0)
+
             get_or_create_file_report(file_2, "visual_comparison", {
                 "compared_with": file_1.name,
-                "summary": result["summary"],
+                "summary": summary_2,
                 "timestamp": str(datetime.now())
             })
 

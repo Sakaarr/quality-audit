@@ -229,12 +229,13 @@ def format_error_details(error: Dict[str, Any], error_type: str) -> str:
     return html
 
 
-def generate_html_report(report_data: Dict[str, Any]) -> str:
+def generate_html_report(report_data: Dict[str, Any], filename: str = "Document") -> str:
     """
     Generate complete HTML report from validation data.
     
     Args:
         report_data: Complete report data from JSON file
+        filename: Name of the file being reported on
         
     Returns:
         HTML string for the report
@@ -300,7 +301,10 @@ def generate_html_report(report_data: Dict[str, Any]) -> str:
         {generate_google_search_section(reports.get('google_search_validation', {})) if reports.get('google_search_validation') else ''}
         
         <!-- Visual Validation -->
-        {generate_visual_validation_section(reports.get('visual_validation', {}), reports.get('visual_comparison')) if reports.get('visual_validation') or reports.get('visual_comparison') else ''}
+        {generate_visual_validation_section(reports.get('visual_validation', {})) if reports.get('visual_validation') else ''}
+
+        <!-- Visual Comparison -->
+        {generate_visual_comparison_section(reports.get('visual_comparison', {}), filename) if reports.get('visual_comparison') else ''}
 
         <!-- Title Validation -->
         {generate_title_validation_section(reports.get('title_validation', {})) if reports.get('title_validation') else ''}
@@ -804,9 +808,50 @@ def generate_google_search_section(search_data: Dict[str, Any]) -> str:
     '''
 
 
-def generate_visual_validation_section(visual_data: Dict[str, Any], comparison_data: Optional[Dict[str, Any]] = None) -> str:
+def generate_visual_comparison_section(comparison_data: Dict[str, Any], current_filename: str = "This File") -> str:
+    """Generate visual comparison section HTML."""
+    if not comparison_data:
+        return ''
+
+    comp_summary = comparison_data.get('summary', {})
+    other_filename = comparison_data.get('compared_with', 'Other File')
+    
+    sim_score = comp_summary.get('similarity_score', 0)
+    common = comp_summary.get('common_images_count', 0)
+    
+    # Use pre-calculated contextual counts if available, else fallback
+    self_cnt = comp_summary.get('current_file_images', comp_summary.get('file_1_total_images', 0))
+    other_cnt = comp_summary.get('other_file_images', comp_summary.get('file_2_total_images', 0))
+    
+    comparison_html = f'''
+    <div class="visual-comparison" style="margin-top: 20px; padding: 15px; border: 1px solid #b3e5fc; background: #e1f5fe; border-radius: 5px;">
+        <h3 style="margin-top: 0; color: #0277bd; font-size: 11pt;">Cross-File Comparison</h3>
+        <p style="margin-bottom: 10px; font-style: italic;">Comparing <strong>{current_filename}</strong> vs <strong>{other_filename}</strong></p>
+        
+        <div style="display: flex; align-items: center; gap: 30px;">
+            <div class="comp-score">
+                <span style="font-size: 18pt; font-weight: bold; color: {'#2e7d32' if sim_score > 99 else '#f57c00'}">{sim_score}%</span>
+                <span style="display: block; font-size: 9pt; color: #555;">Match</span>
+            </div>
+            <div class="comp-details" style="font-size: 10pt;">
+                    <div>Common Images: <strong>{common}</strong></div>
+                    <div style="color: #666; font-size: 9pt;">({current_filename}: {self_cnt} | {other_filename}: {other_cnt})</div>
+            </div>
+        </div>
+    </div>
+    '''
+
+    return f'''
+    <section class="visual-comparison-section">
+        <h2>8. Visual Comparison</h2>
+        {comparison_html}
+    </section>
+    '''
+
+
+def generate_visual_validation_section(visual_data: Dict[str, Any]) -> str:
     """Generate visual validation section HTML."""
-    if not visual_data and not comparison_data:
+    if not visual_data:
         return ''
         
     # Assuming visual_data structure based on usage
@@ -845,41 +890,12 @@ def generate_visual_validation_section(visual_data: Dict[str, Any], comparison_d
         </div>
         '''
 
-    comparison_html = ''
-    if comparison_data:
-        comp_summary = comparison_data.get('summary', {})
-        other_file = comparison_data.get('compared_with', 'Unknown File')
-        
-        sim_score = comp_summary.get('similarity_score', 0)
-        common = comp_summary.get('common_images_count', 0)
-        self_cnt = comp_summary.get('file_1_total_images', 0) 
-        other_cnt = comp_summary.get('file_2_total_images', 0)
-        
-        comparison_html = f'''
-        <div class="visual-comparison" style="margin-top: 20px; padding: 15px; border: 1px solid #b3e5fc; background: #e1f5fe; border-radius: 5px;">
-            <h3 style="margin-top: 0; color: #0277bd; font-size: 11pt;">Cross-File Comparison</h3>
-            <p style="margin-bottom: 10px; font-style: italic;">Compared against: <strong>{other_file}</strong></p>
-            
-            <div style="display: flex; align-items: center; gap: 30px;">
-                <div class="comp-score">
-                    <span style="font-size: 18pt; font-weight: bold; color: {'#2e7d32' if sim_score > 99 else '#f57c00'}">{sim_score}%</span>
-                    <span style="display: block; font-size: 9pt; color: #555;">Match</span>
-                </div>
-                <div class="comp-details" style="font-size: 10pt;">
-                     <div>Common Images: <strong>{common}</strong></div>
-                     <div style="color: #666; font-size: 9pt;">(This File: {self_cnt} vs Other: {other_cnt})</div>
-                </div>
-            </div>
-        </div>
-        '''
-
     return f'''
     <section class="visual-section">
         <h2>7. Visual Validation</h2>
         {stats_html}
         {score_html}
-        {comparison_html}
-        {issues_html or (f'<p>No visual issues detected. Document layout appears consistent.</p>' if not comparison_html else '')}
+        {issues_html or '<p>No visual issues detected. Document layout appears consistent.</p>'}
     </section>
     '''
 
@@ -903,7 +919,7 @@ def generate_title_validation_section(title_data: Any) -> str:
     
     return f'''
     <section class="title-section">
-        <h2>8. Title Validation</h2>
+        <h2>9. Title Validation</h2>
         <div class="title-card" style="border-left: 4px solid {status_color}">
             <div class="title-content">
                 <strong>Extracted Title:</strong>
@@ -979,7 +995,7 @@ def generate_reference_validation_section(reference_data: Dict[str, Any]) -> str
             
         return f'''
         <section class="reference-section">
-            <h2>9. Reference/Constraint Validation</h2>
+            <h2>10. Reference/Constraint Validation</h2>
             <div class="ref-summary">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding: 10px; background: #f9f9f9;">
                     <span>Found <strong>{total_refs}</strong> references</span>
@@ -1014,7 +1030,7 @@ def generate_reference_validation_section(reference_data: Dict[str, Any]) -> str
 
     return f'''
     <section class="reference-section">
-        <h2>9. Reference/Constraint Validation</h2>
+        <h2>11. Reference/Constraint Validation</h2>
         <div class="ref-summary">
             <p>Overall Status: <strong>{overall.upper()}</strong></p>
             <div class="ref-checks">
@@ -1045,7 +1061,7 @@ def generate_formatting_validation_section(fmt_data: Dict[str, Any]) -> str:
 
     return f'''
     <section class="formatting-section">
-        <h2>Formatting Analysis</h2>
+        <h2>12.Formatting Analysis</h2>
         <div class="fmt-details">
             <p><strong>Fonts:</strong> {font_str}</p>
             <p><strong>Margins:</strong> {margin_str}</p>
