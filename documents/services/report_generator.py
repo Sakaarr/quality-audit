@@ -36,21 +36,21 @@ def calculate_document_health_score(report_data: Dict[str, Any]) -> float:
         total_errors = 0
         total_words = 0
         total_readability = 0
-        page_count = len(grammar_data)
+        segment_count = len(grammar_data)
         
-        for page in grammar_data:
+        for segment in grammar_data:
             # Count errors
-            spelling_errors = len(page.get('spelling_errors', []))
-            grammar_errors = len(page.get('grammar_errors', []))
+            spelling_errors = len(segment.get('spelling_errors', []))
+            grammar_errors = len(segment.get('grammar_errors', []))
             total_errors += spelling_errors + grammar_errors
             
             # Estimate word count from original text
-            original_text = page.get('original_text', '')
+            original_text = segment.get('original_text', '')
             words = len(original_text.split())
             total_words += words
             
             # Get readability score
-            readability = page.get('readability_scores', {})
+            readability = segment.get('readability_scores', {})
             flesch_score = readability.get('flesch_reading_ease', 50)
             total_readability += flesch_score
         
@@ -61,8 +61,8 @@ def calculate_document_health_score(report_data: Dict[str, Any]) -> float:
         else:
             grammar_score = 50
         
-        # Calculate readability score (normalize Flesch to 0-100)
-        avg_readability = total_readability / page_count if page_count > 0 else 50
+        # Calculate readability score (normalize        # Weigh readability score
+        avg_readability = total_readability / segment_count if segment_count > 0 else 50
         readability_score = min(100, max(0, avg_readability))
         
         # Weighted average
@@ -133,24 +133,24 @@ def calculate_document_health_score(report_data: Dict[str, Any]) -> float:
 
 def generate_error_summary(grammar_data: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Generate summary statistics for errors across all pages.
+    Generate summary statistics for errors across the document.
     
     Args:
-        grammar_data: List of page validation results
+        grammar_data: List of page/paragraph validation results
         
     Returns:
         Dictionary with error statistics
     """
     total_spelling = 0
     total_grammar = 0
-    total_pages = len(grammar_data)
+    total_segments = len(grammar_data)
     
     spelling_by_type = {}
     grammar_by_type = {}
     
-    for page in grammar_data:
-        spelling_errors = page.get('spelling_errors', [])
-        grammar_errors = page.get('grammar_errors', [])
+    for segment in grammar_data:
+        spelling_errors = segment.get('spelling_errors', [])
+        grammar_errors = segment.get('grammar_errors', [])
         
         total_spelling += len(spelling_errors)
         total_grammar += len(grammar_errors)
@@ -168,8 +168,8 @@ def generate_error_summary(grammar_data: List[Dict[str, Any]]) -> Dict[str, Any]
         'total_spelling_errors': total_spelling,
         'total_grammar_errors': total_grammar,
         'total_errors': total_spelling + total_grammar,
-        'total_pages': total_pages,
-        'avg_errors_per_page': round((total_spelling + total_grammar) / total_pages, 2) if total_pages > 0 else 0,
+        'total_segments': total_segments,
+        'avg_errors_per_segment': round((total_spelling + total_grammar) / total_segments, 2) if total_segments > 0 else 0,
         'spelling_by_type': spelling_by_type,
         'grammar_by_type': grammar_by_type
     }
@@ -180,25 +180,30 @@ def generate_readability_chart_data(grammar_data: List[Dict[str, Any]]) -> Dict[
     Prepare readability data for chart visualization.
     
     Args:
-        grammar_data: List of page validation results
+        grammar_data: List of page/paragraph validation results
         
     Returns:
         Dictionary with chart-ready data
     """
-    pages = []
+    labels = []
     flesch_scores = []
     grade_levels = []
     
-    for page in grammar_data:
-        page_num = page.get('page', 0)
-        readability = page.get('readability_scores', {})
+    for segment in grammar_data:
+        # Check for paragraph_number (DOCX) or page (PDF)
+        if 'paragraph_number' in segment:
+            label = f"Para {segment.get('paragraph_number', 0)}"
+        else:
+            label = f"Page {segment.get('page', 0)}"
+            
+        readability = segment.get('readability_scores', {})
         
-        pages.append(f"Page {page_num}")
+        labels.append(label)
         flesch_scores.append(readability.get('flesch_reading_ease', 0))
         grade_levels.append(readability.get('flesch_kincaid_grade', 0))
     
     return {
-        'labels': pages,
+        'labels': labels,
         'flesch_reading_ease': flesch_scores,
         'flesch_kincaid_grade': grade_levels
     }
@@ -321,7 +326,7 @@ def generate_html_report(report_data: Dict[str, Any], filename: str = "Document"
         <!-- Formatting Validation -->
         {generate_formatting_validation_section(reports.get('formatting_validation', {})) if reports.get('formatting_validation') else ''}
         
-         <!-- Figure Placement Validation -->
+        <!-- Figure Placement Validation -->
         {generate_figure_placement_section(reports.get('figure_placement', {})) if reports.get('figure_placement') else ''}
         
         <!-- Footer -->
@@ -386,7 +391,7 @@ def generate_readability_section(chart_data: Dict[str, Any]) -> str:
     return f'''
     <section class="readability-section">
         <h2>1. Readability Analysis</h2>
-        <p>The following chart illustrates the readability metrics across all pages of the document.</p>
+        <p>The following chart illustrates the readability metrics across the document.</p>
         <div class="chart-container">
             <canvas id="readabilityChart"></canvas>
         </div>
@@ -438,14 +443,19 @@ def generate_readability_section(chart_data: Dict[str, Any]) -> str:
 
 
 def generate_page_analysis(grammar_data: List[Dict[str, Any]]) -> str:
-    """Generate page-by-page analysis section HTML."""
-    pages_html = []
+    """Generate page-by-page or paragraph-by-paragraph analysis section HTML."""
+    segments_html = []
     
-    for page in grammar_data:
-        page_num = page.get('page', 0)
-        spelling_errors = page.get('spelling_errors', [])
-        grammar_errors = page.get('grammar_errors', [])
-        readability = page.get('readability_scores', {})
+    for segment in grammar_data:
+        # Check for paragraph_number (DOCX) or page (PDF)
+        if 'paragraph_number' in segment:
+            segment_label = f"Paragraph {segment.get('paragraph_number', 0)}"
+        else:
+            segment_label = f"Page {segment.get('page', 0)}"
+            
+        spelling_errors = segment.get('spelling_errors', [])
+        grammar_errors = segment.get('grammar_errors', [])
+        readability = segment.get('readability_scores', {})
         
         errors_html = []
         for error in spelling_errors:
@@ -453,26 +463,26 @@ def generate_page_analysis(grammar_data: List[Dict[str, Any]]) -> str:
         for error in grammar_errors:
             errors_html.append(format_error_details(error, 'grammar'))
         
-        page_html = f'''
+        segment_html = f'''
         <div class="page-analysis">
-            <h3>Page {page_num}</h3>
+            <h3>{segment_label}</h3>
             <div class="readability-metrics">
                 <span class="metric">Flesch Reading Ease: <strong>{readability.get('flesch_reading_ease', 'N/A')}</strong></span>
                 <span class="metric">Grade Level: <strong>{readability.get('flesch_kincaid_grade', 'N/A')}</strong></span>
                 <span class="metric">Errors: <strong>{len(spelling_errors) + len(grammar_errors)}</strong></span>
             </div>
             <div class="errors-container">
-                {''.join(errors_html) if errors_html else '<p class="no-errors">No errors found on this page</p>'}
+                {''.join(errors_html) if errors_html else f'<p class="no-errors">No errors found in this {"paragraph" if "paragraph_number" in segment else "page"}</p>'}
             </div>
         </div>
         '''
-        pages_html.append(page_html)
+        segments_html.append(segment_html)
     
     return f'''
     <section class="page-analysis-section">
-        <h2>1. Detailed Page Analysis</h2>
-        <p>This section provides a comprehensive breakdown of errors and readability metrics for each page.</p>
-        {''.join(pages_html)}
+        <h2>1. Detailed Document Analysis</h2>
+        <p>This section provides a comprehensive breakdown of errors and readability metrics for each section of the document.</p>
+        {''.join(segments_html)}
     </section>
     '''
 
@@ -758,8 +768,9 @@ def generate_google_search_section(search_data: Dict[str, Any]) -> str:
     items_html = []
     for res in results:
         if not isinstance(res, dict):
-        # Fallback for non-dict results (e.g. if a list of strings was passed)
+            # Fallback for non-dict results (e.g. if a list of strings was passed)
             res = {"title": str(res), "found": False}
+            
         title = res.get('title', '')
         # Fallback if title is empty/missing but term exists (legacy support)
         if not title:
@@ -1081,7 +1092,6 @@ def generate_formatting_validation_section(fmt_data: Dict[str, Any]) -> str:
         </div>
     </section>
     '''
-
 
 def generate_figure_placement_section(figure_data: Dict[str, Any]) -> str:
     """Generate figure placement validation section HTML."""
