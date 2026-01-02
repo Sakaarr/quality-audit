@@ -51,6 +51,12 @@ from documents.validator.CodeValidator import AICodeValidator
 from documents.services.grammar_checker import GrammarAnalysisService
 from documents.services.visual_comparator import VisualComparator
 
+from documents.services.cpd_cv_compare import (
+    extract_cpd_content,
+    extract_cv_content,
+    compare_academic_qualifications
+)
+from documents.serializers import CPDCVComparisonSerializer
 class BaseDocumentParserView(APIView):
     parser_classes = [MultiPartParser, FormParser]
     permission_classes = [AllowAny]
@@ -1486,6 +1492,97 @@ class VisualComparisonView(APIView):
                 {"error": str(e)}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+            
+            
+class FileCompareView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [AllowAny]
+    serializer_class = CPDCVComparisonSerializer
+
+    @extend_schema(
+        request=CPDCVComparisonSerializer,
+        responses={200: OpenApiResponse(description="Success"), 400: OpenApiResponse(description="Validation Error")}
+    )
+    def post(self, request):
+        serializer = CPDCVComparisonSerializer(data=request.data)
+        
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            if 'cv_file' not in request.FILES or 'cpd_file' not in request.FILES:
+                return Response({
+                    'status': 'error',
+                    'message': 'Both cv_file and cpd_file are required.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            cv_file = request.FILES['cv_file']
+            cpd_file = request.FILES['cpd_file']
+            
+            cpd_json = extract_cpd_content(cpd_file)
+            cv_json = extract_cv_content(cv_file)
+            
+            comparison_result = compare_academic_qualifications(cpd_json, cv_json)
+            
+            # 4. Step 3: Prepare response data safely
+            # We use .get() or check keys to prevent the "Missing required file" KeyError
+            response_data = {
+                'status': 'success',
+                'message': 'Files processed successfully',
+                'extracted_data': {
+                    'cpd': cpd_json,
+                    'cv': cv_json
+                },
+                'comparison': comparison_result,
+                'summary': {
+                    'overall_status': comparison_result.get('overall_status', 'NOT MATCHED'),
+                    'total_cpd_qualifications': comparison_result.get('total_cpd_qualifications', 0),
+                    'total_cv_qualifications': comparison_result.get('total_cv_qualifications', 0),
+                    'matched_count': comparison_result.get('matched_count', 0),
+                    'not_matched_count': comparison_result.get('not_matched_count', 0)
+                }
+            }
+            
+            return Response(response_data, status=status.HTTP_200_OK)
+        
+        except Exception as e:
+            # Log the error for debugging
+            import traceback
+            print(traceback.format_exc())
+            return Response({
+                'status': 'error',
+                'message': f'Error processing files: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class ExtractContentView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        file_type = request.data.get('file_type', 'cv')
+        
+        if 'file' not in request.FILES:
+            return Response({
+                'status': 'error',
+                'message': 'No file provided'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            file = request.FILES['file']
+            if file_type == 'cpd':
+                extracted_data = extract_cpd_content(file)
+            else:
+                extracted_data = extract_cv_content(file)
+            
+            return Response({
+                'status': 'success',
+                'extracted_data': extracted_data
+            }, status=status.HTTP_200_OK)
+        
+        except Exception as e:
+            return Response({
+                'status': 'error',
+                'message': f'Error extracting content: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 class FigurePlacementValidationView(APIView):
     parser_classes = [MultiPartParser, FormParser]
     permission_classes = [AllowAny]

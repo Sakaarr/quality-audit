@@ -20,6 +20,7 @@ from documents.views import (
     DocumentAnalysisView,
     AccessibilityValidationView,
     VisualComparisonView,
+    FileCompareView,
     FigurePlacementValidationView,
 )
 
@@ -72,6 +73,8 @@ urlpatterns = [
         ReportGenerationView.as_view(),
         name='generate-report'
     ),
+    
+    path('compare/', FileCompareView.as_view(), name='file_compare'),
     path(
         'figure-placement/validate/',
         FigurePlacementValidationView.as_view(),

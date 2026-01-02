@@ -141,7 +141,10 @@ class UploadSerializer(serializers.Serializer):
         default=False, 
         help_text="Check this box if CE Activity Date is provided (Enables 2-year lookback)"
     )
-    
+
+class CPDCVComparisonSerializer(serializers.Serializer):
+    cv_file = serializers.FileField()
+    cpd_file = serializers.FileField()
 class FigureUploadSerializer(serializers.Serializer):
     """Serializer for a single DOCX file validation."""
     file = serializers.FileField(
