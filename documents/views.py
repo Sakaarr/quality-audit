@@ -25,6 +25,7 @@ from documents.serializers import (
     FormattingComparisonSerializer,
     ParsedDocumentSerializer,
     TitleComparisonSerializer,
+    FigureUploadSerializer,
 )
 from documents.services.docx_parser import DocxParser
 from documents.services.format_comparison import FormattingComparisonService
@@ -34,7 +35,7 @@ from documents.services.title_validation import TitleValidationService
 from documents.utils import save_parsed_document, get_or_create_unified_document
 from documents.services.pdf_parser import PdfParser
 from documents.services.visual_validator import VisualContentValidator
-
+from documents.services.figure_placement_service import FigurePlacementVerifier
 from documents.serializers import DocumentUploadSerializer, TitleComparisonSerializer, SectionValidationSerializer, SectionValidationSerializer, UploadSerializer
 from documents.services.docx_parser import DocxParser
 from documents.services.pdf_parser import PdfParser
@@ -1485,3 +1486,51 @@ class VisualComparisonView(APIView):
                 {"error": str(e)}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+class FigurePlacementValidationView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [AllowAny]
+    serializer_class = FigureUploadSerializer 
+
+    @extend_schema(
+        summary="Validate Figure Caption Placement",
+        request=FigureUploadSerializer,
+        responses={
+            200: OpenApiResponse(
+                description="Shortened placement report",
+                examples=[
+                    OpenApiExample(
+                        "SuccessResponse",
+                        value={
+                            "file_name": "report.docx",
+                            "all_valid": False,
+                            "total_figures": 2,
+                            "placements_above": 1,
+                            "placements_below": 1,
+                            "accuracy_percentage": 50.0,
+                            "details": [
+                                {"caption": "Figure 1: Site Map", "placement": "BELOW", "is_valid": True},
+                                {"caption": "Figure 2: Chart", "placement": "ABOVE", "is_valid": False}
+                            ]
+                        },
+                    )
+                ],
+            )
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        file_obj = serializer.validated_data['file']
+        
+        # Parse and verify
+        doc_data = DocxParser().parse(file_obj)
+        result = FigurePlacementVerifier().verify_placement(doc_data.text["paragraphs"])
+        
+        # Persist for report generation
+        get_or_create_file_report(file_obj, "figure_placement", result)
+
+        return Response({
+            "file_name": file_obj.name,
+            **result
+        }, status=status.HTTP_200_OK)

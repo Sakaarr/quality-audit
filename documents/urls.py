@@ -20,6 +20,7 @@ from documents.views import (
     DocumentAnalysisView,
     AccessibilityValidationView,
     VisualComparisonView,
+    FigurePlacementValidationView,
 )
 
 
@@ -71,5 +72,10 @@ urlpatterns = [
         ReportGenerationView.as_view(),
         name='generate-report'
     ),
+    path(
+        'figure-placement/validate/',
+        FigurePlacementValidationView.as_view(),
+        name='figure-placement-validate'
+    )
 ]
 

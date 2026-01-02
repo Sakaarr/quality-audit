@@ -26,12 +26,12 @@ class DocxParser:
         sections = self._build_sections(document)
         tables = self._extract_tables(document)
         images = self._extract_images(document)
-        paragraphs = [
-            paragraph.text.strip()
-            for paragraph in document.paragraphs
-            if paragraph.text.strip()
-        ]
-
+        
+        paragraphs = []
+        for paragraph in document.paragraphs:
+            text_with_markers = self._get_paragraph_text_with_images(paragraph)
+            if text_with_markers.strip():
+                paragraphs.append(text_with_markers)
         text_payload = {"full_text": "\n".join(paragraphs), "paragraphs": paragraphs}
 
         return UnifiedDocument(
@@ -49,6 +49,29 @@ class DocxParser:
             },
         )
 
+    def _get_paragraph_text_with_images(self, paragraph) -> str:
+        """
+        Iterates through runs to extract text AND detect where images are located.
+        Returns a string with '<<IMAGE>>' markers inserted at the correct positions.
+        """
+        text_parts = []
+        
+        # XML namespace for Word processing drawings
+        # We need this to find the <w:drawing> tags hidden in the XML
+        namespace = '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+        
+        for run in paragraph.runs:
+            # 1. Add the text content of the run
+            if run.text:
+                text_parts.append(run.text)
+            
+            # 2. Check the underlying XML of the run for drawing elements
+            # This detects images, charts, and shapes
+            if run.element.findall(f'.//{namespace}drawing') or \
+               run.element.findall(f'.//{namespace}pict'):
+                text_parts.append("\n<<IMAGE>>\n")
+
+        return "".join(text_parts).strip()
     def _extract_metadata(self, document: DocxDocument) -> dict:
         props = document.core_properties
 

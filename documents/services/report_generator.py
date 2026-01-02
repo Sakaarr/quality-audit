@@ -116,6 +116,12 @@ def calculate_document_health_score(report_data: Dict[str, Any]) -> float:
         total_score += sec_data.get('completeness_score', 0)
         score_count += 1
     
+    # Figure Placement scoring
+    fig_data = reports.get('figure_placement', {})
+    if fig_data:
+        total_score += fig_data.get('accuracy_percentage', 0)
+        score_count += 1
+    
     # Calculate final score
     if score_count > 0:
         final_score = total_score / score_count
@@ -314,6 +320,9 @@ def generate_html_report(report_data: Dict[str, Any], filename: str = "Document"
         
         <!-- Formatting Validation -->
         {generate_formatting_validation_section(reports.get('formatting_validation', {})) if reports.get('formatting_validation') else ''}
+        
+         <!-- Figure Placement Validation -->
+        {generate_figure_placement_section(reports.get('figure_placement', {})) if reports.get('figure_placement') else ''}
         
         <!-- Footer -->
         <footer class="report-footer">
@@ -748,6 +757,9 @@ def generate_google_search_section(search_data: Dict[str, Any]) -> str:
         
     items_html = []
     for res in results:
+        if not isinstance(res, dict):
+        # Fallback for non-dict results (e.g. if a list of strings was passed)
+            res = {"title": str(res), "found": False}
         title = res.get('title', '')
         # Fallback if title is empty/missing but term exists (legacy support)
         if not title:
@@ -1066,6 +1078,56 @@ def generate_formatting_validation_section(fmt_data: Dict[str, Any]) -> str:
             <p><strong>Fonts:</strong> {font_str}</p>
             <p><strong>Margins:</strong> {margin_str}</p>
             {warnings_html}
+        </div>
+    </section>
+    '''
+
+
+def generate_figure_placement_section(figure_data: Dict[str, Any]) -> str:
+    """Generate figure placement validation section HTML."""
+    if not figure_data:
+        return ''
+    
+    total = figure_data.get('total_figures', 0)
+    above = figure_data.get('placements_above', 0)
+    below = figure_data.get('placements_below', 0)
+    accuracy = figure_data.get('accuracy_percentage', 0.0)
+    details = figure_data.get('details', [])
+    
+    details_html = []
+    for d in details:
+        status_color = '#2e7d32' if d.get('is_valid') else '#d32f2f'
+        details_html.append(f'''
+            <div style="margin-bottom: 8px; padding: 10px; border-left: 3px solid {status_color}; background: #f9f9f9;">
+                <div style="display: flex; justify-content: space-between;">
+                    <strong>{d.get('caption', 'Unknown Figure')}</strong>
+                    <span style="color: {status_color}; font-weight: bold;">{d.get('placement', 'UNKNOWN')}</span>
+                </div>
+            </div>
+        ''')
+
+    return f'''
+    <section class="figure-placement-section">
+        <h2>13. Figure Caption Placement</h2>
+        <p>Analysis of {total} figure(s) for correct caption placement (expected BELOW image).</p>
+        
+        <div style="display: flex; gap: 20px; margin: 15px 0;">
+            <div style="flex: 1; text-align: center; padding: 15px; background: #f5f5f5; border: 1px solid #ddd;">
+                <div style="font-size: 20pt; font-weight: bold;">{accuracy}%</div>
+                <div style="font-size: 9pt; color: #666;">ACCURACY</div>
+            </div>
+            <div style="flex: 1; text-align: center; padding: 15px; background: #f5f5f5; border: 1px solid #ddd;">
+                <div style="font-size: 20pt; font-weight: bold;">{above}</div>
+                <div style="font-size: 9pt; color: #666;">ABOVE IMAGE</div>
+            </div>
+            <div style="flex: 1; text-align: center; padding: 15px; background: #f5f5f5; border: 1px solid #ddd;">
+                <div style="font-size: 20pt; font-weight: bold;">{below}</div>
+                <div style="font-size: 9pt; color: #666;">BELOW IMAGE</div>
+            </div>
+        </div>
+        
+        <div class="figure-details">
+            {''.join(details_html) if details_html else '<p>No figures detected in the document.</p>'}
         </div>
     </section>
     '''

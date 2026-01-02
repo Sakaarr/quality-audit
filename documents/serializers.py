@@ -141,3 +141,16 @@ class UploadSerializer(serializers.Serializer):
         default=False, 
         help_text="Check this box if CE Activity Date is provided (Enables 2-year lookback)"
     )
+    
+class FigureUploadSerializer(serializers.Serializer):
+    """Serializer for a single DOCX file validation."""
+    file = serializers.FileField(
+        required=True,
+        help_text="Upload the DOCX file to check figure caption placements."
+    )
+
+    def validate_file(self, value):
+        """Optional: Ensure only .docx files are uploaded."""
+        if not value.name.endswith('.docx'):
+            raise serializers.ValidationError("Only .docx files are supported.")
+        return value
