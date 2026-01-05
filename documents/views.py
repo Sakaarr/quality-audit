@@ -36,7 +36,6 @@ from documents.utils import save_parsed_document, get_or_create_unified_document
 from documents.services.pdf_parser import PdfParser
 from documents.services.visual_validator import VisualContentValidator
 from documents.services.figure_placement_service import FigurePlacementVerifier
-from documents.services.table_placement import TablePlacementVerifier
 from documents.serializers import DocumentUploadSerializer, TitleComparisonSerializer, SectionValidationSerializer, SectionValidationSerializer, UploadSerializer
 from documents.services.docx_parser import DocxParser
 from documents.services.pdf_parser import PdfParser
@@ -1632,52 +1631,3 @@ class FigurePlacementValidationView(APIView):
             "file_name": file_obj.name,
             **result
         }, status=status.HTTP_200_OK)
-        
-        
-    class TablePlacementValidationView(APIView):
-        parser_classes = [MultiPartParser, FormParser]
-        permission_classes = [AllowAny]
-        serializer_class = FigureUploadSerializer
-
-        @extend_schema(
-            summary="Validate Table Caption Placement",
-            request=FigureUploadSerializer,
-            responses={
-                200: OpenApiResponse(
-                    description="Table placement validation report",
-                    examples=[
-                        OpenApiExample(
-                            "SuccessResponse",
-                            value={
-                                "file_name": "report.docx",
-                                "all_valid": False,
-                                "total_tables": 3,
-                                "placements_above": 2,
-                                "placements_below": 1,
-                                "accuracy_percentage": 66.67,
-                                "details": [
-                                    {"caption": "Table 1: Survey Results", "placement": "ABOVE", "is_valid": True},
-                                    {"caption": "Table 2: Demographics", "placement": "BELOW", "is_valid": False},
-                                    {"caption": "Table 3: Statistics", "placement": "ABOVE", "is_valid": True}
-                                ]
-                            },
-                        )
-                    ],
-                )
-            },
-        )
-        def post(self, request, *args, **kwargs):
-            serializer = self.serializer_class(data=request.data)
-            serializer.is_valid(raise_exception=True)
-            
-            file_obj = serializer.validated_data['file']
-            
-            doc_data = DocxParser().parse(file_obj)
-            result = TablePlacementVerifier().verify_placement(doc_data.text["paragraphs"])
-            
-            get_or_create_file_report(file_obj, "table_placement", result)
-
-            return Response({
-                "file_name": file_obj.name,
-                **result
-            }, status=status.HTTP_200_OK)
