@@ -22,6 +22,7 @@ from documents.views import (
     VisualComparisonView,
     FileCompareView,
     FigurePlacementValidationView,
+    TablePlacementValidationView,
 )
 
 
@@ -79,6 +80,11 @@ urlpatterns = [
         'figure-placement/validate/',
         FigurePlacementValidationView.as_view(),
         name='figure-placement-validate'
+    ),
+    path(
+        'table-placement/validate/',
+        TablePlacementValidationView.as_view(),
+        name='table-placement-validate'
     )
 ]
 
