@@ -28,10 +28,20 @@ class DocxParser:
         images = self._extract_images(document)
         
         paragraphs = []
-        for paragraph in document.paragraphs:
-            text_with_markers = self._get_paragraph_text_with_images(paragraph)
-            if text_with_markers.strip():
-                paragraphs.append(text_with_markers)
+        from docx.oxml.text.paragraph import CT_P
+        from docx.oxml.table import CT_Tbl
+        from docx.text.paragraph import Paragraph
+
+        for child in document.element.body.iterchildren():
+                if child.tag.endswith('p'):
+
+                    p = Paragraph(child, document.element.body)
+                    text_with_markers = self._get_paragraph_text_with_images(p)
+                    if text_with_markers.strip():
+                        paragraphs.append(text_with_markers)
+                
+                elif child.tag.endswith('tbl'):
+                    paragraphs.append("<<TABLE>>")
         text_payload = {"full_text": "\n".join(paragraphs), "paragraphs": paragraphs}
 
         return UnifiedDocument(

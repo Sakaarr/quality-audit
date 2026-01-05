@@ -36,6 +36,7 @@ from documents.utils import save_parsed_document, get_or_create_unified_document
 from documents.services.pdf_parser import PdfParser
 from documents.services.visual_validator import VisualContentValidator
 from documents.services.figure_placement_service import FigurePlacementVerifier
+from documents.services.table_placement_service import TablePlacementVerifier
 from documents.serializers import DocumentUploadSerializer, TitleComparisonSerializer, SectionValidationSerializer, SectionValidationSerializer, UploadSerializer
 from documents.services.docx_parser import DocxParser
 from documents.services.pdf_parser import PdfParser
@@ -1626,6 +1627,54 @@ class FigurePlacementValidationView(APIView):
         
         # Persist for report generation
         get_or_create_file_report(file_obj, "figure_placement", result)
+
+        return Response({
+            "file_name": file_obj.name,
+            **result
+        }, status=status.HTTP_200_OK)
+        
+class TablePlacementValidationView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [AllowAny]
+    serializer_class = DocumentUploadSerializer
+
+    @extend_schema(
+        summary="Validate Table Caption Placement",
+        request=DocumentUploadSerializer,
+        responses={
+            200: OpenApiResponse(
+                description="Shortened placement report for tables",
+                examples=[
+                    OpenApiExample(
+                        "SuccessResponse",
+                        value={
+                            "file_name": "report.docx",
+                            "all_valid": True,
+                            "total_tables": 1,
+                            "placements_above": 1,
+                            "placements_below": 0,
+                            "accuracy_percentage": 100.0,
+                            "details": [
+                                {"caption": "Table 1: Data", "placement": "ABOVE", "is_valid": True},
+                            ]
+                        },
+                    )
+                ],
+            )
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        file_obj = serializer.validated_data['file']
+        
+        # Parse and verify
+        doc_data = DocxParser().parse(file_obj)
+        result = TablePlacementVerifier().verify_placement(doc_data.text["paragraphs"])
+        
+        # Persist for report generation
+        get_or_create_file_report(file_obj, "table_placement", result)
 
         return Response({
             "file_name": file_obj.name,

@@ -329,6 +329,8 @@ def generate_html_report(report_data: Dict[str, Any], filename: str = "Document"
         <!-- Figure Placement Validation -->
         {generate_figure_placement_section(reports.get('figure_placement', {})) if reports.get('figure_placement') else ''}
         
+        {generate_table_placement_section(reports.get('table_placement', {})) if reports.get('table_placement') else ''}
+        
         <!-- Footer -->
         <footer class="report-footer">
             <p>Quality Audit System © {datetime.now().year}</p>
@@ -1138,6 +1140,81 @@ def generate_figure_placement_section(figure_data: Dict[str, Any]) -> str:
         
         <div class="figure-details">
             {''.join(details_html) if details_html else '<p>No figures detected in the document.</p>'}
+        </div>
+    </section>
+    '''
+
+def generate_table_placement_section(table_data: Dict[str, Any]) -> str:
+    """Generate table placement validation section HTML."""
+    if not table_data:
+        return ''
+    
+    total = table_data.get('total_tables', 0)
+    above = table_data.get('placements_above', 0)
+    below = table_data.get('placements_below', 0)
+    accuracy = table_data.get('accuracy_percentage', 0.0)
+    details = table_data.get('details', [])
+    
+    unlabeled = table_data.get('unlabeled_tables', [])
+    
+    details_html = []
+    
+    if unlabeled:
+        for u in unlabeled:
+            details_html.append(f'''
+            <div style="margin-bottom: 8px; padding: 10px; border-left: 3px solid #f57c00; background: #fff3e0;">
+                 <div style="display: flex; gap: 10px; align-items: center;">
+                    <span style="font-size: 14pt;">⚠️</span>
+                    <strong>{u}</strong>
+                 </div>
+            </div>
+            ''')
+
+    metadata_tables = table_data.get('metadata_tables', [])
+    if metadata_tables:
+        for m in metadata_tables:
+            details_html.append(f'''
+            <div style="margin-bottom: 8px; padding: 10px; background: #f9f9f9; border-left: 3px solid #757575;">
+                 <strong>Info:</strong> {m}
+            </div>
+            ''')
+
+    for d in details:
+        status_color = '#2e7d32' if d.get('is_valid') else '#d32f2f'
+        details_html.append(f'''
+            <div style="margin-bottom: 8px; padding: 10px; border-left: 3px solid {status_color}; background: #f9f9f9;">
+                <div style="display: flex; justify-content: space-between;">
+                    <div>
+                        <strong>{d.get('caption', 'Unknown Table')}</strong>
+                        <span style="color: #666; font-size: 0.85em; margin-left: 8px;">[{d.get('type', 'Unknown')}]</span>
+                    </div>
+                    <span style="color: {status_color}; font-weight: bold;">{d.get('placement', 'UNKNOWN')}</span>
+                </div>
+            </div>
+        ''')
+
+    return f'''
+    <section class="table-placement-section">
+        <h2>14. Table Caption Placement</h2>
+        <p>Analysis of {total} table(s) for correct caption placement (expected ABOVE table).</p>
+        
+        <div style="display: flex; gap: 20px; margin: 15px 0;">
+            <div style="flex: 1; text-align: center; padding: 15px; background: #f5f5f5; border: 1px solid #ddd;">
+                <div style="font-size: 20pt; font-weight: bold;">{accuracy}%</div>
+                <div style="font-size: 9pt; color: #666;">ACCURACY</div>
+            </div>
+            <div style="flex: 1; text-align: center; padding: 15px; background: #f5f5f5; border: 1px solid #ddd;">
+                <div style="font-size: 20pt; font-weight: bold;">{above}</div>
+                <div style="font-size: 9pt; color: #666;">ABOVE TABLE</div>
+            </div>
+            <div style="flex: 1; text-align: center; padding: 15px; background: #f5f5f5; border: 1px solid #ddd;">
+                <div style="font-size: 20pt; font-weight: bold;">{below}</div>
+                <div style="font-size: 9pt; color: #666;">BELOW TABLE</div>
+            </div>
+        </div>
+        
+        <div class="table-details">
+            {''.join(details_html) if details_html else '<p>No tables detected in the document.</p>'}
         </div>
     </section>
     '''
