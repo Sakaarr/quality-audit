@@ -37,6 +37,7 @@ from documents.services.pdf_parser import PdfParser
 from documents.services.visual_validator import VisualContentValidator
 from documents.services.figure_placement_service import FigurePlacementVerifier
 from documents.services.table_placement_service import TablePlacementVerifier
+from documents.services.word_count_validator import WordCountValidator
 from documents.serializers import DocumentUploadSerializer, TitleComparisonSerializer, SectionValidationSerializer, SectionValidationSerializer, UploadSerializer
 from documents.services.docx_parser import DocxParser
 from documents.services.pdf_parser import PdfParser
@@ -1680,3 +1681,107 @@ class TablePlacementValidationView(APIView):
             "file_name": file_obj.name,
             **result
         }, status=status.HTTP_200_OK)
+        
+        
+        
+class WordCountValidationView(APIView):
+    """
+    API endpoint for validating document word count against CE standards.
+    
+    Expects a file upload and returns word count metrics including:
+    - Total word count
+    - Validation status (valid/below_minimum/above_maximum)
+    - Difference from acceptable range if invalid
+    """
+    
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [AllowAny]
+    serializer_class = DocumentUploadSerializer
+
+    @extend_schema(
+        request=DocumentUploadSerializer,
+        responses={
+            200: OpenApiResponse(
+                description="Word count validation response",
+                examples=[
+                    OpenApiExample(
+                        "WordCountValidationResponse",
+                        value={
+                            "word_count": 2750,
+                            "is_valid": True,
+                            "min_required": 2500,
+                            "max_required": 3000,
+                            "difference": 0,
+                            "status": "valid",
+                            "details": {
+                                "message": "Document meets word count requirements (2750 words)"
+                            }
+                        },
+                    )
+                ],
+            )
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        """
+        Validate uploaded document's word count.
+        
+        Returns cached result if available, otherwise processes document
+        and caches the result for future requests.
+        """
+        try:
+            serializer = self.serializer_class(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            file_obj = serializer.validated_data["file"]
+            
+            # Check cache first to avoid redundant processing
+            cache_info = get_or_create_file_report(file_obj, "word_count_validation")
+            if cache_info.get("from_cache"):
+                cached_result = cache_info.get("report_data") or {}
+                return Response(cached_result, status=status.HTTP_200_OK)
+            
+            # Validate file type
+            lower_name = file_obj.name.lower()
+            if not (lower_name.endswith(".docx") or lower_name.endswith(".pdf")):
+                raise ValidationError(
+                    "Unsupported file type. Only DOCX and PDF files are supported."
+                )
+            
+            # Get or create unified document from cache
+            unified_doc, _ = get_or_create_unified_document(file_obj)
+            
+            # Extract full text using the correct API
+            parsed_data = unified_doc.to_representation()
+            full_text = parsed_data.get("text", {}).get("full_text", "")
+            
+            # Validate word count
+            validator = WordCountValidator(min_words=2400, max_words=3000)
+            result = validator.validate(full_text)
+            result_dict = result.to_dict()
+            
+            # Cache the result
+            get_or_create_file_report(file_obj, "word_count_validation", result_dict)
+            
+            return Response(result_dict, status=status.HTTP_200_OK)
+            
+        except ValidationError as ve:
+            return Response(
+                {"error": str(ve)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {
+                    "error": str(e),
+                    "word_count": 0,
+                    "is_valid": False,
+                    "min_required": 2400,
+                    "max_required": 3000,
+                    "difference": 0,
+                    "status": "error",
+                    "details": {"message": f"Error processing document: {str(e)}"}
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

@@ -23,6 +23,7 @@ from documents.views import (
     FileCompareView,
     FigurePlacementValidationView,
     TablePlacementValidationView,
+    WordCountValidationView,
 )
 
 
@@ -85,6 +86,11 @@ urlpatterns = [
         "table-placement/validate/",
         TablePlacementValidationView.as_view(),
         name="table-placement-validate",
+    ),
+     path(
+        'word-count/validate/',
+        WordCountValidationView.as_view(),
+        name='word-count-validate'
     ),
 ]
 

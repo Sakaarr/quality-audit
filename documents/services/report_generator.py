@@ -330,7 +330,8 @@ def generate_html_report(report_data: Dict[str, Any], filename: str = "Document"
         {generate_figure_placement_section(reports.get('figure_placement', {})) if reports.get('figure_placement') else ''}
         
         {generate_table_placement_section(reports.get('table_placement', {})) if reports.get('table_placement') else ''}
-        
+         <!-- Word Count Validation -->
+        {generate_word_count_validation_section(reports.get('word_count_validation', {})) if reports.get('word_count_validation') else ''}
         <!-- Footer -->
         <footer class="report-footer">
             <p>Quality Audit System © {datetime.now().year}</p>
@@ -1215,6 +1216,64 @@ def generate_table_placement_section(table_data: Dict[str, Any]) -> str:
         
         <div class="table-details">
             {''.join(details_html) if details_html else '<p>No tables detected in the document.</p>'}
+        </div>
+    </section>
+    '''
+def generate_word_count_validation_section(word_count_data: Dict[str, Any]) -> str:
+    """Generate word count validation section HTML."""
+    if not word_count_data:
+        return ''
+    
+    word_count = word_count_data.get('word_count', 0)
+    is_valid = word_count_data.get('is_valid', False)
+    min_required = word_count_data.get('min_required', 2400)
+    max_required = word_count_data.get('max_required', 3000)
+    difference = word_count_data.get('difference', 0)
+    status = word_count_data.get('status', 'unknown')
+    message = word_count_data.get('details', {}).get('message', 'No details available')
+    
+    # Determine status color and icon
+    if is_valid:
+        status_color = '#2e7d32'
+        status_icon = '✓'
+        status_text = 'MEETS REQUIREMENTS'
+    elif status == 'below_minimum':
+        status_color = '#d32f2f'
+        status_icon = '✗'
+        status_text = 'BELOW MINIMUM'
+    elif status == 'above_maximum':
+        status_color = '#d32f2f'
+        status_icon = '✗'
+        status_text = 'ABOVE MAXIMUM'
+    else:
+        status_color = '#f57c00'
+        status_icon = '⚠'
+        status_text = 'UNKNOWN STATUS'
+    
+    return f'''
+    <section class="word-count-section">
+        <h2>15. Word Count Validation</h2>
+        <p>Document word count validation against Copy Editor standards (2500-3000 words).</p>
+        
+        <div style="display: flex; gap: 20px; margin: 15px 0;">
+            <div style="flex: 1; text-align: center; padding: 15px; background: #f5f5f5; border: 1px solid #ddd;">
+                <div style="font-size: 20pt; font-weight: bold;">{word_count}</div>
+                <div style="font-size: 9pt; color: #666;">WORD COUNT</div>
+            </div>
+            <div style="flex: 1; text-align: center; padding: 15px; background: #f5f5f5; border: 1px solid #ddd;">
+                <div style="font-size: 20pt; font-weight: bold;">{min_required}-{max_required}</div>
+                <div style="font-size: 9pt; color: #666;">REQUIRED RANGE</div>
+            </div>
+            <div style="flex: 1; text-align: center; padding: 15px; background: {status_color}15; border: 1px solid {status_color};">
+                <div style="font-size: 20pt; font-weight: bold; color: {status_color};">{status_icon}</div>
+                <div style="font-size: 9pt; color: {status_color}; font-weight: bold;">{status_text}</div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 15px; padding: 15px; border-left: 4px solid {status_color}; background: #f9f9f9;">
+            <div style="font-weight: bold; margin-bottom: 8px; color: {status_color};">{status_text}</div>
+            <div style="color: #333; font-size: 10pt;">{message}</div>
+            {f'<div style="color: #666; font-size: 10pt; margin-top: 6px;">Difference: {abs(difference)} words {"short" if difference < 0 else "over"}</div>' if difference != 0 else ''}
         </div>
     </section>
     '''
