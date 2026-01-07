@@ -328,10 +328,11 @@ def generate_html_report(report_data: Dict[str, Any], filename: str = "Document"
         
         <!-- Figure Placement Validation -->
         {generate_figure_placement_section(reports.get('figure_placement', {})) if reports.get('figure_placement') else ''}
-        
         {generate_table_placement_section(reports.get('table_placement', {})) if reports.get('table_placement') else ''}
-         <!-- Word Count Validation -->
+        
+        <!-- Word Count Validation -->
         {generate_word_count_validation_section(reports.get('word_count_validation', {})) if reports.get('word_count_validation') else ''}
+        
         <!-- Footer -->
         <footer class="report-footer">
             <p>Quality Audit System © {datetime.now().year}</p>
@@ -1068,33 +1069,195 @@ def generate_reference_validation_section(reference_data: Dict[str, Any]) -> str
 
 
 def generate_formatting_validation_section(fmt_data: Dict[str, Any]) -> str:
-    """Generate formatting validation section HTML."""
+    """Generate formatting validation section HTML with comparison results."""
     if not fmt_data:
         return ''
-        
+    
+    # Extract basic formatting data
     fonts = fmt_data.get('fonts', {})   
+    font_sizes = fmt_data.get('font_sizes', {})
     margins = fmt_data.get('margins', {})
+    indentation = fmt_data.get('indentation', {})
     spacing = fmt_data.get('spacing', {})
     warnings = fmt_data.get('warnings', [])
+    source_type = fmt_data.get('source_type', 'unknown')
+    original_name = fmt_data.get('original_name', 'Unknown File')
     
-    font_str = f"{fonts.get('primary', 'Unknown')} ({', '.join(map(str, fonts.get('values', [])))})"
-    margin_str = f"Top: {margins.get('top')}, Bottom: {margins.get('bottom')}, L: {margins.get('left')}, R: {margins.get('right')} ({margins.get('units')})"
+    # Extract comparison context (if available)
+    comparison_context = fmt_data.get('comparison_context', {})
+    has_comparison = bool(comparison_context)
+    
+    # Build basic formatting info HTML
+    font_str = f"{fonts.get('primary', 'Unknown')}"
+    if fonts.get('values'):
+        font_str += f" (variants: {', '.join(map(str, fonts.get('values', [])))})"
+    
+    font_size_str = f"{font_sizes.get('primary', 'N/A')} pt"
+    if font_sizes.get('values') and len(font_sizes.get('values', [])) > 1:
+        font_size_str += f" (variants: {', '.join(map(str, font_sizes.get('values', [])))} pt)"
+    
+    margin_str = f"Top: {margins.get('top')} {margins.get('units', 'pt')}, Bottom: {margins.get('bottom')} {margins.get('units', 'pt')}, Left: {margins.get('left')} {margins.get('units', 'pt')}, Right: {margins.get('right')} {margins.get('units', 'pt')}"
+    
+    indent_left = indentation.get('left', {}).get('primary', 'N/A')
+    indent_right = indentation.get('right', {}).get('primary', 'N/A')
+    indent_first = indentation.get('first_line', {}).get('primary', 'N/A')
+    indent_str = f"Left: {indent_left}, Right: {indent_right}, First Line: {indent_first} ({indentation.get('units', 'pt')})"
+    
+    line_spacing = spacing.get('line', {}).get('primary', 'N/A')
+    spacing_before = spacing.get('before', {}).get('primary', 'N/A')
+    spacing_after = spacing.get('after', {}).get('primary', 'N/A')
+    spacing_str = f"Line: {line_spacing}, Before: {spacing_before}, After: {spacing_after} ({spacing.get('units', 'pt')})"
     
     warnings_html = ''
     if warnings:
         w_list = ''.join([f'<li>{w}</li>' for w in warnings])
-        warnings_html = f'<div class="fmt-warnings"><strong>Warnings:</strong><ul>{w_list}</ul></div>'
-
+        warnings_html = f'<div class="fmt-warnings" style="margin-top: 10px; padding: 10px; background: #fff3e0; border-left: 3px solid #f57c00;"><strong>⚠ Warnings:</strong><ul style="margin: 5px 0 0 20px;">{w_list}</ul></div>'
+    
+    # Build comparison results HTML (if comparison was performed)
+    comparison_html = ''
+    if has_comparison:
+        consistency = comparison_context.get('consistency', {})
+        compared_with = comparison_context.get('compared_with', [])
+        total_files = comparison_context.get('total_files_compared', 0)
+        is_reference_mode = comparison_context.get('is_reference_mode', False)
+        reference_file = comparison_context.get('reference_file')
+        
+        # Overall status
+        all_match = consistency.get('all_match', False)
+        status_text = 'PASSED' if all_match else 'FAILED'
+        status_color = '#2e7d32' if all_match else '#d32f2f'
+        status_bg = '#e8f5e9' if all_match else '#ffebee'
+        status_icon = '✓' if all_match else '✗'
+        
+        # Compared files info
+        if is_reference_mode and reference_file:
+            compared_files_str = f"Reference: {reference_file}"
+            comparison_mode_text = "Reference-Based Comparison"
+        else:
+            compared_files_str = ', '.join(compared_with) if compared_with else 'N/A'
+            comparison_mode_text = "Multi-File Comparison"
+        
+        # Individual metric results
+        metrics = [
+            ('Fonts', consistency.get('fonts_match', False)),
+            ('Font Sizes', consistency.get('font_sizes_match', False)),
+            ('Margins', consistency.get('margins_match', False)),
+            ('Indentation', consistency.get('indentation_match', False)),
+            ('Line Spacing', consistency.get('spacing_match', False)),
+        ]
+        
+        metrics_html = []
+        for metric_name, is_match in metrics:
+            icon = '✓' if is_match else '✗'
+            color = '#2e7d32' if is_match else '#d32f2f'
+            bg = '#e8f5e9' if is_match else '#ffebee'
+            status = 'MATCH' if is_match else 'MISMATCH'
+            
+            metrics_html.append(f'''
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; margin-bottom: 6px; background: {bg}; border-left: 3px solid {color}; border-radius: 3px;">
+                <span style="font-weight: 500; color: #333;">{metric_name}</span>
+                <span style="color: {color}; font-weight: bold; font-size: 11pt;">
+                    {icon} {status}
+                </span>
+            </div>
+            ''')
+        
+        # Mismatched metrics details
+        mismatched = consistency.get('mismatched_metrics', [])
+        mismatch_details_html = ''
+        if mismatched:
+            mismatch_list = []
+            for mm in mismatched:
+                # Convert metric name to readable format
+                readable_name = mm.replace('_match', '').replace('_', ' ').title()
+                mismatch_list.append(f'<li><strong>{readable_name}</strong></li>')
+            
+            mismatch_details_html = f'''
+            <div style="margin-top: 15px; padding: 12px; background: #fff3e0; border-left: 3px solid #f57c00; border-radius: 3px;">
+                <strong style="color: #e65100;">⚠ Mismatched Attributes:</strong>
+                <ul style="margin: 8px 0 0 20px; color: #333;">
+                    {''.join(mismatch_list)}
+                </ul>
+                <p style="margin: 8px 0 0 0; font-size: 9pt; color: #666; font-style: italic;">
+                    These attributes differ from the compared files and may need adjustment.
+                </p>
+            </div>
+            '''
+        
+        # Tolerance info
+        tolerances = consistency.get('tolerances', {})
+        tolerance_html = ''
+        if tolerances:
+            tolerance_html = f'''
+            <div style="margin-top: 10px; padding: 8px; background: #f5f5f5; border-radius: 3px; font-size: 9pt; color: #666;">
+                <strong>Comparison Tolerances:</strong> 
+                Margins: ±{tolerances.get('margin_pt', 0.5)} pt, 
+                Font Size: ±{tolerances.get('font_size_pt', 0.2)} pt, 
+                Line Spacing: ±{tolerances.get('line_spacing_pt', 0.5)} pt
+            </div>
+            '''
+        
+        comparison_html = f'''
+        <div class="comparison-results" style="margin-top: 20px; padding: 15px; background: {status_bg}; border: 2px solid {status_color}; border-radius: 5px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid {status_color};">
+                <h3 style="margin: 0; color: #333; font-size: 13pt;">{comparison_mode_text}</h3>
+                <span style="background: {status_color}; color: white; padding: 6px 16px; border-radius: 4px; font-weight: bold; font-size: 11pt;">
+                    {status_icon} {status_text}
+                </span>
+            </div>
+            
+            <div style="margin-bottom: 12px; padding: 10px; background: white; border-radius: 3px;">
+                <div style="font-size: 10pt; color: #666; margin-bottom: 5px;">
+                    <strong>{compared_files_str}</strong>
+                </div>
+                <div style="font-size: 10pt; color: #666;">
+                    <strong>Total files in comparison:</strong> {total_files}
+                </div>
+            </div>
+            
+            <div style="margin-top: 12px;">
+                <strong style="display: block; margin-bottom: 8px; color: #333;">Attribute Comparison:</strong>
+                {''.join(metrics_html)}
+            </div>
+            
+            {mismatch_details_html}
+            {tolerance_html}
+        </div>
+        '''
+    
     return f'''
     <section class="formatting-section">
-        <h2>12.Formatting Analysis</h2>
+        <h2>12. Formatting Analysis</h2>
         <div class="fmt-details">
-            <p><strong>Fonts:</strong> {font_str}</p>
-            <p><strong>Margins:</strong> {margin_str}</p>
+            <div style="margin-bottom: 15px; padding: 12px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 5px;">
+                <div style="margin-bottom: 8px;">
+                    <strong>File:</strong> {original_name} 
+                    <span style="color: #666; font-size: 9pt;">({source_type.upper()})</span>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 10px;">
+                <strong>Primary Font:</strong> {font_str}
+            </div>
+            <div style="margin-bottom: 10px;">
+                <strong>Primary Font Size:</strong> {font_size_str}
+            </div>
+            <div style="margin-bottom: 10px;">
+                <strong>Margins:</strong> {margin_str}
+            </div>
+            <div style="margin-bottom: 10px;">
+                <strong>Indentation:</strong> {indent_str}
+            </div>
+            <div style="margin-bottom: 10px;">
+                <strong>Spacing:</strong> {spacing_str}
+            </div>
+            
             {warnings_html}
+            {comparison_html}
         </div>
     </section>
     '''
+
 
 def generate_figure_placement_section(figure_data: Dict[str, Any]) -> str:
     """Generate figure placement validation section HTML."""
@@ -1142,6 +1305,7 @@ def generate_figure_placement_section(figure_data: Dict[str, Any]) -> str:
         <div class="figure-details">
             {''.join(details_html) if details_html else '<p>No figures detected in the document.</p>'}
         </div>
+    </section>
     </section>
     '''
 
@@ -1219,6 +1383,7 @@ def generate_table_placement_section(table_data: Dict[str, Any]) -> str:
         </div>
     </section>
     '''
+
 def generate_word_count_validation_section(word_count_data: Dict[str, Any]) -> str:
     """Generate word count validation section HTML."""
     if not word_count_data:
@@ -1277,6 +1442,8 @@ def generate_word_count_validation_section(word_count_data: Dict[str, Any]) -> s
         </div>
     </section>
     '''
+
+
 
 def get_report_styles() -> str:
     """Return CSS styles for the report - Professional A4 Document Format."""

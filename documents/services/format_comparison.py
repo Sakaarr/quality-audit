@@ -18,14 +18,33 @@ class FormattingComparisonService:
     FONT_SIZE_TOLERANCE_PT = 0.2
     LINE_SPACING_TOLERANCE_PT = 0.5
 
-    def compare(self, files: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze each uploaded file and report formatting consistency."""
+    def compare(self, files: Dict[str, Any], reference_label: str = None) -> Dict[str, Any]:
+        """
+        Analyze each uploaded file and report formatting consistency.
+        
+        Args:
+            files: Dictionary of file labels to uploaded files
+            reference_label: Optional label of the reference file (e.g., 'reference_file').
+                           When provided, all other files are compared against this reference.
+                           When None, all files are compared together (legacy behavior).
+        
+        Returns:
+            Dictionary with 'documents' (list of analyses) and 'consistency' (comparison results)
+        """
         analyses: List[Dict[str, Any]] = []
 
         for label, uploaded in files.items():
-            analyses.append(self._analyze_file(label, uploaded))
+            if uploaded:  # Skip None values
+                analyses.append(self._analyze_file(label, uploaded))
 
-        consistency = self._build_consistency_report(analyses)
+        # Determine comparison mode
+        if reference_label and reference_label in files and files[reference_label]:
+            # Reference-based comparison: compare each file against the reference
+            consistency = self._build_reference_comparison_report(analyses, reference_label)
+        else:
+            # Legacy mode: compare all files together
+            consistency = self._build_consistency_report(analyses)
+            
         return {"documents": analyses, "consistency": consistency}
 
     # ------------------------------------------------------------------
@@ -334,6 +353,159 @@ class FormattingComparisonService:
             "font_size_pt": self.FONT_SIZE_TOLERANCE_PT,
             "line_spacing_pt": self.LINE_SPACING_TOLERANCE_PT,
         }
+
+        return metrics
+
+
+    def _build_reference_comparison_report(
+        self, analyses: List[Dict[str, Any]], reference_label: str
+    ) -> Dict[str, Any]:
+        """
+        Build comparison report where each file is compared against a reference file.
+        
+        Args:
+            analyses: List of document analyses
+            reference_label: Label of the reference document
+            
+        Returns:
+            Dictionary with individual comparison metrics for each file against the reference
+        """
+        if not analyses:
+            return {
+                "fonts_match": True,
+                "font_sizes_match": True,
+                "margins_match": True,
+                "indentation_match": True,
+                "spacing_match": True,
+                "all_match": True,
+                "details": {},
+                "mismatched_metrics": [],
+                "comparison_mode": "reference",
+                "reference_file": None,
+                "per_file_comparisons": {},
+            }
+
+        # Find the reference document
+        reference_doc = None
+        for doc in analyses:
+            if doc["label"] == reference_label:
+                reference_doc = doc
+                break
+
+        if not reference_doc:
+            # Fallback to legacy mode if reference not found
+            return self._build_consistency_report(analyses)
+
+        # Store individual comparison results for each CE file
+        per_file_comparisons = {}
+        
+        # Track overall results (for backward compatibility)
+        all_fonts_match = True
+        all_font_sizes_match = True
+        all_margins_match = True
+        all_indentation_match = True
+        all_spacing_match = True
+
+        for doc in analyses:
+            if doc["label"] == reference_label:
+                continue  # Skip the reference itself
+
+            # Compare this document against the reference
+            font_match = self._strings_match([
+                reference_doc["fonts"]["primary"],
+                doc["fonts"]["primary"]
+            ])
+            font_size_match = self._numeric_match(
+                [reference_doc["font_sizes"]["primary"], doc["font_sizes"]["primary"]],
+                tolerance=self.FONT_SIZE_TOLERANCE_PT,
+            )
+            margin_match = self._dict_match(
+                [reference_doc["margins"], doc["margins"]],
+                tolerance=self.MARGIN_TOLERANCE_PT
+            )
+            indent_left_match = self._numeric_match(
+                [
+                    reference_doc["indentation"]["left"]["primary"],
+                    doc["indentation"]["left"]["primary"]
+                ],
+                tolerance=self.MARGIN_TOLERANCE_PT,
+                allow_partial=False,
+            )
+            indent_first_match = self._numeric_match(
+                [
+                    reference_doc["indentation"]["first_line"]["primary"],
+                    doc["indentation"]["first_line"]["primary"]
+                ],
+                tolerance=self.MARGIN_TOLERANCE_PT,
+                allow_partial=False,
+            )
+            indentation_match = indent_left_match and indent_first_match
+
+            line_spacing_match = self._numeric_match(
+                [
+                    reference_doc["spacing"]["line"]["primary"],
+                    doc["spacing"]["line"]["primary"]
+                ],
+                tolerance=self.LINE_SPACING_TOLERANCE_PT,
+                allow_partial=False,
+            )
+            spacing_match = line_spacing_match
+
+            # Build individual file comparison result
+            file_metrics = {
+                "fonts_match": font_match,
+                "font_sizes_match": font_size_match,
+                "margins_match": margin_match,
+                "indentation_match": indentation_match,
+                "spacing_match": spacing_match,
+            }
+            file_all_match = all(file_metrics.values())
+            file_metrics["all_match"] = file_all_match
+            file_metrics["details"] = {
+                "line_spacing_match": spacing_match,
+                "indent_left_match": indent_left_match,
+                "indent_first_line_match": indent_first_match,
+            }
+            file_metrics["mismatched_metrics"] = [
+                key for key, value in file_metrics.items() if key.endswith("_match") and not value
+            ]
+            
+            # Store this file's comparison result
+            per_file_comparisons[doc["label"]] = file_metrics
+
+            # Aggregate for overall result
+            all_fonts_match = all_fonts_match and font_match
+            all_font_sizes_match = all_font_sizes_match and font_size_match
+            all_margins_match = all_margins_match and margin_match
+            all_indentation_match = all_indentation_match and indentation_match
+            all_spacing_match = all_spacing_match and spacing_match
+
+        # Build overall metrics (for backward compatibility)
+        metrics = {
+            "fonts_match": all_fonts_match,
+            "font_sizes_match": all_font_sizes_match,
+            "margins_match": all_margins_match,
+            "indentation_match": all_indentation_match,
+            "spacing_match": all_spacing_match,
+        }
+        all_match = all(metrics.values())
+        metrics["all_match"] = all_match
+        metrics["details"] = {
+            "line_spacing_match": all_spacing_match,
+            "indent_left_match": indent_left_match if 'indent_left_match' in locals() else True,
+            "indent_first_line_match": indent_first_match if 'indent_first_match' in locals() else True,
+        }
+        metrics["mismatched_metrics"] = [
+            key for key, value in metrics.items() if key.endswith("_match") and not value
+        ]
+        metrics["tolerances"] = {
+            "margin_pt": self.MARGIN_TOLERANCE_PT,
+            "font_size_pt": self.FONT_SIZE_TOLERANCE_PT,
+            "line_spacing_pt": self.LINE_SPACING_TOLERANCE_PT,
+        }
+        metrics["comparison_mode"] = "reference"
+        metrics["reference_file"] = reference_doc.get("original_name", "Reference")
+        metrics["per_file_comparisons"] = per_file_comparisons
 
         return metrics
 

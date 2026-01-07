@@ -59,6 +59,7 @@ from documents.services.cpd_cv_compare import (
     compare_academic_qualifications
 )
 from documents.serializers import CPDCVComparisonSerializer
+
 class BaseDocumentParserView(APIView):
     parser_classes = [MultiPartParser, FormParser]
     permission_classes = [AllowAny]
@@ -179,7 +180,6 @@ class ParsedDocumentRetrieveView(RetrieveAPIView):
             return super().get(request, *args, **kwargs)
         except ParsedDocument.DoesNotExist:
             raise NotFound("Parsed document not found.")
-
 class DocxGrammarCheckView(BaseDocumentParserView):
     parser = DocxParser()
 
@@ -393,8 +393,7 @@ class PdfGrammarCheckView(BaseDocumentParserView):
         if not file_obj.name.lower().endswith(".pdf"):
             raise ValidationError("Upload a .pdf file to this endpoint.")
 
-        # 1) Try cached PDF grammar report first
-        cache_info = get_or_create_file_report(file_obj, "pdf-grammer-validation")
+        cache_info = get_or_create_file_report(file_obj, "pdf-grammar-validation")
         if cache_info.get("from_cache"):
             analyzed_pages = cache_info.get("report_data") or []
             total_errors = sum(
@@ -402,13 +401,14 @@ class PdfGrammarCheckView(BaseDocumentParserView):
                 for page in analyzed_pages
             )
         else:
-            # 2) Parse (or load) unified document once via shared cache
             unified_doc, _ = get_or_create_unified_document(
                 file_obj,
                 enable_ocr=serializer.validated_data.get("enable_ocr", True),
             )
             parsed_data = unified_doc.to_representation()
             pages = parsed_data.get("text", {}).get("pages", [])
+
+            # Extract page texts
             page_texts = [page.get("text", "") for page in pages]
             
             # Get optimized service
@@ -417,7 +417,7 @@ class PdfGrammarCheckView(BaseDocumentParserView):
             # PARALLEL PROCESSING - Analyze all pages at once
             include_readability = serializer.validated_data.get("include_readability", False)
             analysis_results = grammar_service.analyze_batch(page_texts, include_readability)
-
+            
             analyzed_pages = []
             total_errors = 0
 
@@ -437,16 +437,16 @@ class PdfGrammarCheckView(BaseDocumentParserView):
                 analyzed_pages.append(page_data)
                 total_errors += analysis["total_errors"]
 
-
             get_or_create_file_report(file_obj, "pdf-grammar-validation", analyzed_pages)
 
         return Response({
-        "source_type": "pdf",
-        "language_check": "en-US & en-GB (Fast Mode)",
-        "total_pages_analyzed": len(analyzed_pages),
-        "total_errors_found": total_errors,
-        "pages_with_errors": analyzed_pages,
-    })
+            "source_type": "pdf",
+            "language_check": "en-US & en-GB (Fast Mode)",
+            "total_pages_analyzed": len(analyzed_pages),
+            "total_errors_found": total_errors,
+            "pages_with_errors": analyzed_pages,
+        })
+
 
 class TitleValidationView(APIView):
     parser_classes = [MultiPartParser, FormParser]
@@ -591,6 +591,7 @@ class SectionValidationView(APIView):
             unified_doc, _ = get_or_create_unified_document(file_obj)
             sections_data = [s.to_representation() for s in unified_doc.sections]
             paragraphs = unified_doc.text.get("paragraphs", [])
+
             validator = SectionValidator(required_sections=required_sections)
             result = validator.validate(sections_data, paragraphs=paragraphs)
             
@@ -809,29 +810,83 @@ class FormattingComparisonView(APIView):
         serializer = self.serializer_class(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        # Extract files
+        reference_file = serializer.validated_data.get("reference_file")
+        file_1 = serializer.validated_data["file_1"]
+        file_2 = serializer.validated_data.get("file_2")
+        file_3 = serializer.validated_data.get("file_3")
+
+        # Build files dictionary
+        files = {}
+        if reference_file:
+            files["reference_file"] = reference_file
+        files["file_1"] = file_1
+        if file_2:
+            files["file_2"] = file_2
+        if file_3:
+            files["file_3"] = file_3
+
+        # Perform comparison
         service = self.service_class()
         comparison = service.compare(
-            {
-                "file_1": serializer.validated_data["file_1"],
-                "file_2": serializer.validated_data["file_2"],
-                "file_3": serializer.validated_data.get("file_3"),
-            }
+            files,
+            reference_label="reference_file" if reference_file else None
         )
         
-        # Persist results for each file
+        # Persist results for each file with comparison context
         files_map = {
-            "file_1": serializer.validated_data["file_1"],
-            "file_2": serializer.validated_data["file_2"],
-            "file_3": serializer.validated_data.get("file_3"),
+            "reference_file": reference_file,
+            "file_1": file_1,
+            "file_2": file_2,
+            "file_3": file_3,
         }
         
+        # Get consistency/comparison results
+        consistency = comparison.get("consistency", {})
         documents_stats = comparison.get("documents", [])
+        
+        # Determine comparison mode
+        is_reference_mode = consistency.get("comparison_mode") == "reference"
+        reference_filename = consistency.get("reference_file") if is_reference_mode else None
+        
+        # Build list of compared file names for context
+        compared_files = [
+            doc.get("original_name") 
+            for doc in documents_stats 
+            if doc.get("original_name")
+        ]
+        
         for doc_stat in documents_stats:
             label = doc_stat.get("label")
             if label in files_map and files_map[label]:
-                get_or_create_file_report(files_map[label], "formatting_validation", doc_stat)
+                # Skip saving report for reference file itself
+                if is_reference_mode and label == "reference_file":
+                    continue
+                
+                # Get individual file's comparison result (if in reference mode)
+                if is_reference_mode:
+                    per_file_comparisons = consistency.get("per_file_comparisons", {})
+                    file_specific_consistency = per_file_comparisons.get(label, consistency)
+                    compared_with = [reference_filename] if reference_filename else []
+                else:
+                    file_specific_consistency = consistency
+                    compared_with = [f for f in compared_files if f != doc_stat.get("original_name")]
+                
+                # Add comparison context to each file's data
+                enhanced_data = {
+                    **doc_stat,
+                    "comparison_context": {
+                        "compared_with": compared_with,
+                        "consistency": file_specific_consistency,  # Use file-specific results
+                        "total_files_compared": len(compared_files),
+                        "is_reference_mode": is_reference_mode,
+                        "reference_file": reference_filename if is_reference_mode else None,
+                    }
+                }
+                get_or_create_file_report(files_map[label], "formatting_validation", enhanced_data)
                 
         return Response(comparison)
+
 
 class VisualValidationView(APIView):
     parser_classes = [MultiPartParser, FormParser]
@@ -1508,8 +1563,7 @@ class VisualComparisonView(APIView):
                 {"error": str(e)}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-            
-            
+
 class FileCompareView(APIView):
     parser_classes = [MultiPartParser, FormParser]
     permission_classes = [AllowAny]
@@ -1647,7 +1701,8 @@ class FigurePlacementValidationView(APIView):
             "file_name": file_obj.name,
             **result
         }, status=status.HTTP_200_OK)
-        
+
+
 class TablePlacementValidationView(APIView):
     parser_classes = [MultiPartParser, FormParser]
     permission_classes = [AllowAny]
@@ -1695,9 +1750,8 @@ class TablePlacementValidationView(APIView):
             "file_name": file_obj.name,
             **result
         }, status=status.HTTP_200_OK)
-        
-        
-        
+
+
 class WordCountValidationView(APIView):
     """
     API endpoint for validating document word count against CE standards.

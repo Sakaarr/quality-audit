@@ -91,20 +91,39 @@ class TitleComparisonSerializer(serializers.Serializer):
 
 
 class FormattingComparisonSerializer(serializers.Serializer):
-    file_1 = serializers.FileField(help_text="First DOCX or PDF document.")
-    file_2 = serializers.FileField(help_text="Second DOCX or PDF document.")
-    file_3 = serializers.FileField(help_text="Third DOCX or PDF document.")
+    reference_file = serializers.FileField(
+        required=False,
+        help_text="Optional reference document (RW). When provided, other files are compared against this reference."
+    )
+    file_1 = serializers.FileField(help_text="First DOCX or PDF document (CE1).")
+    file_2 = serializers.FileField(
+        required=False,
+        help_text="Second DOCX or PDF document (CE2)."
+    )
+    file_3 = serializers.FileField(
+        required=False,
+        help_text="Third DOCX or PDF document (CE3)."
+    )
 
     ALLOWED_EXTENSIONS = {".pdf", ".docx"}
+    
+    def validate_reference_file(self, value: IO[bytes]) -> IO[bytes]:
+        if value:
+            return self._validate_extension(value)
+        return value
 
     def validate_file_1(self, value: IO[bytes]) -> IO[bytes]:
         return self._validate_extension(value)
 
     def validate_file_2(self, value: IO[bytes]) -> IO[bytes]:
-        return self._validate_extension(value)
+        if value:
+            return self._validate_extension(value)
+        return value
 
     def validate_file_3(self, value: IO[bytes]) -> IO[bytes]:
-        return self._validate_extension(value)
+        if value:
+            return self._validate_extension(value)
+        return value
 
     def _validate_extension(self, value: IO[bytes]) -> IO[bytes]:
         extension = os.path.splitext(value.name)[1].lower()
