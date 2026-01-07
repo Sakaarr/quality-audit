@@ -590,9 +590,9 @@ class SectionValidationView(APIView):
 
             unified_doc, _ = get_or_create_unified_document(file_obj)
             sections_data = [s.to_representation() for s in unified_doc.sections]
-
+            paragraphs = unified_doc.text.get("paragraphs", [])
             validator = SectionValidator(required_sections=required_sections)
-            result = validator.validate(sections_data)
+            result = validator.validate(sections_data, paragraphs=paragraphs)
             
             if hasattr(result, 'to_dict'):
                 result_dict = result.to_dict()
