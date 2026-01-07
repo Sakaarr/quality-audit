@@ -24,6 +24,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from audit_service.health import healthz
 
 urlpatterns = [
+    path("", healthz, name="root"),
     path("admin/", admin.site.urls),
     path("healthz/", healthz, name="healthz"),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),

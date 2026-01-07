@@ -50,7 +50,7 @@ from documents.services.calculation import CalculationValidator
 from documents.services.accessibility_validator import AccessibilityValidator
 from documents.validator.OllamaValidator import AICalculationValidator
 from documents.validator.CodeValidator import AICodeValidator
-from documents.services.grammar_checker import GrammarAnalysisService
+from documents.services.grammar_checker import GrammarAnalysisService, get_service_instance
 from documents.services.visual_comparator import VisualComparator
 
 from documents.services.cpd_cv_compare import (
@@ -189,12 +189,14 @@ class DocxGrammarCheckView(BaseDocumentParserView):
         if not file_obj.name.lower().endswith(".docx"):
             raise ValidationError("Upload a .docx file to this endpoint.")
 
-        # 1) Try to serve from cached grammar report (no re-parse, no re-analysis)
-        cache_info = get_or_create_file_report(file_obj, "docx-grammer-validation")
+        cache_info = get_or_create_file_report(file_obj, "docx-grammar-validation")
         if cache_info.get("from_cache"):
             analyzed_segments = cache_info.get("report_data") or []
+            total_errors = sum(
+                len(seg.get("spelling_errors", [])) + len(seg.get("grammar_errors", []))
+                for seg in analyzed_segments
+            )
         else:
-            # 2) Parse (or load) the document once using the shared parser cache
             unified_doc, _ = get_or_create_unified_document(
                 file_obj,
                 enable_ocr=serializer.validated_data.get("enable_ocr", True),
@@ -207,37 +209,41 @@ class DocxGrammarCheckView(BaseDocumentParserView):
                 if full_text:
                     paragraphs = [full_text]
 
+            # Get optimized service with parallel processing
+            grammar_service = get_service_instance(fast_mode=True, max_workers=4)
+            
+            # PARALLEL PROCESSING - Analyze all paragraphs at once
+            include_readability = serializer.validated_data.get("include_readability", False)
+            analysis_results = grammar_service.analyze_batch(paragraphs, include_readability)
+            
             analyzed_segments = []
+            total_errors = 0
 
-            for index, paragraph in enumerate(paragraphs):
-                analysis = GrammarAnalysisService.analyze_segment(paragraph)
+            for index, analysis in enumerate(analysis_results):
+                if not analysis or not analysis["has_errors"]:
+                    continue
+                
+                segment_data = {
+                    "paragraph_number": index + 1,
+                    "original_text": paragraphs[index],
+                    "spelling_errors": analysis["spelling_errors"],
+                    "grammar_errors": analysis["grammar_errors"],
+                    "corrected_text": analysis["corrected_text"],
+                    "readability_scores": analysis["readability_scores"],
+                    "error_summary": analysis["error_summary"]
+                }
+                analyzed_segments.append(segment_data)
+                total_errors += analysis["total_errors"]
 
-                if analysis["has_errors"]:
-                    analyzed_segments.append(
-                        {
-                            "paragraph_number": index + 1,
-                            "original_text": paragraph,
-                            "spelling_errors": analysis["spelling_errors"],
-                            "grammar_errors": analysis["grammar_errors"],
-                            "corrected_text": analysis["corrected_text"],
-                            "readability_scores": analysis["readability_scores"],
-                        }
-                    )
+            get_or_create_file_report(file_obj, "docx-grammar-validation", analyzed_segments)
 
-            # 3) Persist grammar report keyed by file hash for future calls
-            get_or_create_file_report(
-                file_obj, "docx-grammer-validation", analyzed_segments
-            )
-
-        return Response(
-            {
-                "source_type": "docx",
-                "language_check": "en-US & en-GB (Permissive)",
-                "total_segments": len(analyzed_segments),
-                "results": analyzed_segments,
-            }
-        )
-
+        return Response({
+            "source_type": "docx",
+            "language_check": "en-US & en-GB (Fast Mode)",
+            "total_segments_analyzed": len(analyzed_segments),
+            "total_errors_found": total_errors,
+            "segments_with_errors": analyzed_segments,
+        })
 
 class PdfParseView(BaseDocumentParserView):
     parser = PdfParser()
@@ -391,6 +397,10 @@ class PdfGrammarCheckView(BaseDocumentParserView):
         cache_info = get_or_create_file_report(file_obj, "pdf-grammer-validation")
         if cache_info.get("from_cache"):
             analyzed_pages = cache_info.get("report_data") or []
+            total_errors = sum(
+                len(page.get("spelling_errors", [])) + len(page.get("grammar_errors", []))
+                for page in analyzed_pages
+            )
         else:
             # 2) Parse (or load) unified document once via shared cache
             unified_doc, _ = get_or_create_unified_document(
@@ -399,40 +409,44 @@ class PdfGrammarCheckView(BaseDocumentParserView):
             )
             parsed_data = unified_doc.to_representation()
             pages = parsed_data.get("text", {}).get("pages", [])
+            page_texts = [page.get("text", "") for page in pages]
+            
+            # Get optimized service
+            grammar_service = get_service_instance(fast_mode=True, max_workers=4)
+            
+            # PARALLEL PROCESSING - Analyze all pages at once
+            include_readability = serializer.validated_data.get("include_readability", False)
+            analysis_results = grammar_service.analyze_batch(page_texts, include_readability)
 
             analyzed_pages = []
+            total_errors = 0
 
-            for page in pages:
-                page_num = page.get("page_number", "Unknown")
-                text = page.get("text", "")
+            for page, analysis in zip(pages, analysis_results):
+                if not analysis or not analysis["has_errors"]:
+                    continue
 
-                analysis = GrammarAnalysisService.analyze_segment(text)
+                page_data = {
+                    "page": page.get("page_number", "Unknown"),
+                    "original_text": page.get("text", ""),
+                    "spelling_errors": analysis["spelling_errors"],
+                    "grammar_errors": analysis["grammar_errors"],
+                    "corrected_text": analysis["corrected_text"],
+                    "readability_scores": analysis["readability_scores"],
+                    "error_summary": analysis["error_summary"]
+                }
+                analyzed_pages.append(page_data)
+                total_errors += analysis["total_errors"]
 
-                if analysis["has_errors"]:
-                    analyzed_pages.append(
-                        {
-                            "page": page_num,
-                            "original_text": text,
-                            "spelling_errors": analysis["spelling_errors"],
-                            "grammar_errors": analysis["grammar_errors"],
-                            "corrected_text": analysis["corrected_text"],
-                            "readability_scores": analysis["readability_scores"],
-                        }
-                    )
 
-            # 3) Persist analyzed pages keyed by file hash
-            get_or_create_file_report(
-                file_obj, "pdf-grammer-validation", analyzed_pages
-            )
+            get_or_create_file_report(file_obj, "pdf-grammar-validation", analyzed_pages)
 
-        return Response(
-            {
-                "source_type": "pdf",
-                "language_check": "en-US & en-GB (Permissive)",
-                "total_pages": len(analyzed_pages),
-                "results": analyzed_pages,
-            }
-        )
+        return Response({
+        "source_type": "pdf",
+        "language_check": "en-US & en-GB (Fast Mode)",
+        "total_pages_analyzed": len(analyzed_pages),
+        "total_errors_found": total_errors,
+        "pages_with_errors": analyzed_pages,
+    })
 
 class TitleValidationView(APIView):
     parser_classes = [MultiPartParser, FormParser]
