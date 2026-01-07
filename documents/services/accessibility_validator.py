@@ -36,16 +36,16 @@ class AccessibilityValidator:
             if docPr is not None:
                 alt_text = (docPr.get('descr', '') or docPr.get('title', '') or "").strip()
             
-
+            # If alt text exists = BAD, no alt text = GOOD
             if alt_text:
-                status = "NQ"
+                status = "NQ"  # Not Qualified - has alt text (bad)
                 errors.append({
                     "location": f"Image #{i+1}",
                     "issue": "Alt Text found",
                     "found_text": alt_text
                 })
             else:
-                status = "OK"
+                status = "OK"  # No alt text (good)
 
             image_audit.append({
                 "location": f"Image #{i+1}",
@@ -71,16 +71,16 @@ class AccessibilityValidator:
                 img_obj_str = doc.xref_object(xref)
                 alt_text = self._extract_pdf_alt_text(img_obj_str)
                 
-        
+                # If alt text exists = BAD, no alt text = GOOD
                 if alt_text and alt_text.strip() != "":
-                    status = "NQ"
+                    status = "NQ"  # Not Qualified - has alt text (bad)
                     errors.append({
                         "location": f"Page {page_num+1}, Image #{img_idx+1}",
                         "issue": "Alt Text found",
                         "found_text": alt_text
                     })
                 else:
-                    status = "Q"
+                    status = "OK"  # No alt text (good) - FIXED: was "Q"
                 
                 image_audit.append({
                     "location": f"Page {page_num+1}, Image #{img_idx+1}",
